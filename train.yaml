@@ -1,0 +1,102 @@
+cluster_name: spot
+
+# The autoscaler will scale up the cluster faster with higher upscaling speed.
+# E.g., if the task requires adding more nodes then autoscaler will gradually
+# scale up the cluster in chunks of upscaling_speed*currently_running_nodes.
+# This number should be > 0.
+upscaling_speed: 1.0
+initial_workers: 9
+
+docker:
+    image: "rayproject/ray-ml:latest-gpu"
+    container_name: "ray_container"
+    pull_before_run: True
+    run_options: []
+
+# If a node is idle for this many minutes, it will be removed.
+idle_timeout_minutes: 5
+
+# Cloud-provider specific configuration.
+provider:
+    type: aws
+    region: ca-central-1
+    availability_zone: ca-central-1a, ca-central-1b, ca-central-1d
+    cache_stopped_nodes: True
+
+auth:
+    ssh_user: ubuntu
+
+# Tell the autoscaler the allowed node types and the resources they provide.
+# The key is the name of the node type, which is just for debugging purposes.
+# The node config specifies the launch config and physical instance type.
+available_node_types:
+    ray.head.default:
+        min_workers: 1
+        max_workers: 1
+        resources: {}
+        node_config:
+            InstanceType: m4.xlarge
+            BlockDeviceMappings:
+                - DeviceName: /dev/sda1
+                  Ebs:
+                      VolumeSize: 120
+
+    ray.worker.default:
+        min_workers: 8
+        max_workers: 8
+        resources: {}
+        node_config:
+            InstanceType: c5.xlarge
+            BlockDeviceMappings:
+                - DeviceName: /dev/sda1
+                  Ebs:
+                      VolumeSize: 120
+            #InstanceMarketOptions:
+                #MarketType: spot
+
+# Specify the node type of the head node (as configured above).
+head_node_type: ray.head.default
+
+# Files or directories to copy to the head and worker nodes. The format is a
+# dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
+file_mounts: {
+   "~/test": "./test",
+}
+
+cluster_synced_files: []
+
+file_mounts_sync_continuously: False
+
+rsync_exclude:
+    - "**/.git"
+    - "**/.git/**"
+
+rsync_filter:
+    - ".gitignore"
+
+initialization_commands: []
+
+setup_commands:
+    - export LC_ALL=C.UTF-8
+    - export LANG=C.UTF-8
+
+# Custom commands that will be run on the head node after common setup.
+head_setup_commands: []
+
+# Custom commands that will be run on worker nodes after common setup.
+worker_setup_commands: []
+
+# Command to start ray on the head node. You don't need to change this.
+head_start_ray_commands:
+    - ray stop
+    - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml
+
+# Command to start ray on worker nodes. You don't need to change this.
+worker_start_ray_commands:
+    - ray stop
+    - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076
+
+head_node:
+    ImageId: ami-0ecd5ccac6e9340e6 # Deep Learning AMI (Ubuntu) Version 30
+worker_nodes:
+    ImageId: ami-0ecd5ccac6e9340e6 # Deep Learning AMI (Ubuntu) Version 30
