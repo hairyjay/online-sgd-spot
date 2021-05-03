@@ -18,9 +18,7 @@ from data import *
 # Start ray cluster
 ##################################################################
 
-#ray.init(redis_address="127.0.0.1:6379")
 ray.init(address="auto")
-#ray.init(local_mode=True)
 
 ##################################################################
 # parameter server
@@ -162,6 +160,8 @@ class Worker(object):
         self.lr = lr
 
         self.running = True
+        self.preempt = asyncio.Event()
+        self.preempt.set()
         self.arrival_time = []
         self.gradient_time = []
 
@@ -184,6 +184,8 @@ class Worker(object):
             #print("wait time: {}".format(wait_time))
             await asyncio.sleep(wait_time)
             #print("WORKER {} BATCH {} ARRIVED".format(self.worker_index, self.curritr))
+            if not self.preempt.is_set():
+                await self.preempt.wait()
 
             # SIGNAL PARAMETER SERVER
             try:
@@ -223,6 +225,15 @@ class Worker(object):
         self.gradient_time.append([itr, time.time() - batch_start])
         #print("worker {} gradient of batch {} computed".format(self.worker_index, itr))
         return grads
+
+    def preempt(self):
+        self.preempt.clear()
+
+    def restart(self):
+        self.preempt.set()
+
+    def get_running(self):
+        return self.preempt.is_set()
 
     def terminate(self):
         self.running = False;
@@ -268,6 +279,8 @@ if __name__ == "__main__":
     print("waiting for the end of time")
     while True:
         cmd = input(">>>")
+
+        #KILL
         if cmd == 'k':
             for w in workers:
                 w.terminate.remote()
@@ -275,6 +288,14 @@ if __name__ == "__main__":
             ts.terminate.remote()
             print("all actors terminated")
             break
+        #PREEMPT ALL WORKERS
+        elif cmd == 's':
+            for w in workers:
+                w.preempt.remote()
+        #RESTART ALL WORKERS
+        elif cmd == 'r':
+            for w in workers:
+                w.restart.remote()
 
     path = os.path.join('runs', run_id)
     if not os.path.exists(path):
