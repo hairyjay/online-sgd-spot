@@ -160,8 +160,7 @@ class Worker(object):
         self.lr = lr
 
         self.running = True
-        self.preempt = asyncio.Event()
-        self.preempt.set()
+        self.preempt = False
         self.arrival_time = []
         self.gradient_time = []
 
@@ -184,8 +183,6 @@ class Worker(object):
             #print("wait time: {}".format(wait_time))
             await asyncio.sleep(wait_time)
             #print("WORKER {} BATCH {} ARRIVED".format(self.worker_index, self.curritr))
-            if not self.preempt.is_set():
-                await self.preempt.wait()
 
             # SIGNAL PARAMETER SERVER
             try:
@@ -194,11 +191,12 @@ class Worker(object):
                 self.iterator = iter(self.train_loader)
                 data, target = next(self.iterator)
 
-            self.batches[self.curritr] = (data, target)
-            self.arrival_time.append([self.curritr, time.time() - start_time])
+            if not self.preempt:
+                self.batches[self.curritr] = (data, target)
+                self.arrival_time.append([self.curritr, time.time() - start_time])
 
-            self.ps.signal.remote(self.worker_index, self.curritr)
-            self.curritr += 1
+                self.ps.signal.remote(self.worker_index, self.curritr)
+                self.curritr += 1
 
         arrival_time = np.array(self.arrival_time)
         gradient_time = np.array(self.gradient_time)
@@ -227,13 +225,13 @@ class Worker(object):
         return grads
 
     def preempt(self):
-        self.preempt.clear()
+        self.preempt = True
 
     def restart(self):
-        self.preempt.set()
+        self.preempt = False
 
-    def get_running(self):
-        return self.preempt.is_set()
+    def get_preempted(self):
+        return self.preempt
 
     def terminate(self):
         self.running = False;
