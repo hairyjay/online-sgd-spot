@@ -13,6 +13,7 @@ from torchvision import datasets, transforms
 
 from nets import *
 from data import *
+from price import *
 
 ##################################################################
 # Start ray cluster
@@ -26,7 +27,7 @@ ray.init(address="auto")
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, l=0.005, k=5, t=100):
+    def __init__(self, price_distr, l=0.005, k=5, t=100):
         self.params = 0
         self.l = l
         self.k = k
@@ -34,9 +35,15 @@ class ParameterServer(object):
         self.queue = asyncio.Queue()
         self.processed = 0
         self.workers = None
+        self.start_time = None
 
         self.arrival_time = []
         self.gradient_time = []
+        self.update_time = []
+        self.price_distr = price_distr
+        self.price = self.price_distr.start_price()
+        self.running = True
+        self.price_log = []
 
         self.net = Net()
         print("param server init")
@@ -48,6 +55,7 @@ class ParameterServer(object):
 
     async def queue_processor(self, workers, test_server, start_time):
         self.workers = workers
+        self.start_time = start_time
 
         while True:
             batches = []
@@ -56,22 +64,32 @@ class ParameterServer(object):
                 if b == "stop":
                     arrival_time = np.array(self.arrival_time)
                     gradient_time = np.array(self.gradient_time)
-                    return 'ps', arrival_time, gradient_time
+                    update_time = np.array(self.update_time)
+                    return 'ps', arrival_time, gradient_time, update_time
                 batches.append(b)
+                self.queue.task_done()
 
             group_start = time.time()
 
             weights = []
             for param in self.net.parameters():
                 weights.append(param.data)
-            grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(weights, b[1]) for b in batches])
+            w_ref = ray.put(weights)
+
+            #tasks = [self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches]
+            #grad = ray.get(tasks)
+            grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches])
+            #grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(weights, b[1]) for b in batches])
 
             self.apply_gradients(grad)
-            self.arrival_time.append([self.processed, group_start - start_time])
+            del batches, weights, w_ref, grad#, tasks
+            self.arrival_time.append([self.processed, group_start - self.start_time])
             self.gradient_time.append([self.processed, time.time() - group_start])
+            self.update_time.append([self.processed, time.time() - self.start_time])
 
             if self.processed % self.t == 0:
-                acc = self.queue_acc(test_server)
+                #print("QUEUE SIZE: {}".format(self.queue.qsize()))
+                self.queue_acc(test_server)
 
     def apply_gradients(self, gradients):
         grad = np.mean(gradients, axis = 0)
@@ -79,6 +97,7 @@ class ParameterServer(object):
             param.data -= self.l * torch.Tensor(grad[i])
 
         self.processed += self.k
+        del grad
         #print(self.processed)
 
     def queue_acc(self, test_server):
@@ -87,9 +106,53 @@ class ParameterServer(object):
             weights.append(param.data)
 
         test_server.test_acc.remote(weights, self.processed)
+        del weights
+
+    async def price_generator(self, bid1, bid2=None, n2=0):
+        if bid2:
+            if bid2 < bid1:
+                raise ValueError('bid2 cannot be lower than bid1')
+        n1 = len(self.workers) - n2
+        status1 = True
+        status2 = True
+        last_update = time.time() - self.start_time
+        self.price_log.append([last_update, self.price])
+        print("starting price set to {}".format(self.price))
+
+        while self.running:
+            if bid2:
+                if bid2 < self.price and status2:
+                    for w in self.workers[-n2:]:
+                        w.preempt.remote()
+                    status2 = False
+                    print("n2 preempted due to pricing")
+                elif bid2 >= self.price and not status2:
+                    for w in self.workers[-n2:]:
+                        w.restart.remote()
+                    status2 = True
+                    print("n2 restarted due to pricing")
+            if bid1 < self.price and status1:
+                for w in self.workers[:n1]:
+                    w.preempt.remote()
+                status1 = False
+                print("n1 preempted due to pricing")
+            elif bid1 >= self.price and not status1:
+                for w in self.workers[:n1]:
+                    w.restart.remote()
+                status1 = True
+                print("n1 restarted due to pricing")
+
+            self.price, interval = self.price_distr.get_price()
+            await asyncio.sleep(interval)
+            last_update = time.time() - self.start_time
+            self.price_log.append([last_update, self.price])
+            print("price changed to {}".format(self.price))
+
+        return 'price', np.array(self.price_log)
 
     def terminate(self):
         self.queue.put_nowait("stop")
+        self.running = False
 
 ##################################################################
 # test server
@@ -117,6 +180,7 @@ class TestServer(object):
     async def test_processor(self):
         while True:
             itr = await self.queue.get()
+            self.queue.task_done()
             if itr == "stop":
                 return 'ts', np.array(self.accuracy)
 
@@ -150,7 +214,7 @@ class TestServer(object):
 
 @ray.remote(num_cpus=4)
 class Worker(object):
-    def __init__(self, worker_index, ps, trainset, B=1024, l=0.001, lr=0.03):
+    def __init__(self, worker_index, ps, trainset, B=32, l=0.001, lr=0.03):
         self.worker_index = worker_index
         self.ps = ps
         self.curritr = 0
@@ -168,7 +232,6 @@ class Worker(object):
                                             batch_size=B,
                                             shuffle=True)
         self.iterator = iter(self.train_loader)
-        print(len(self.train_loader))
         self.net = Net()
         self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
         self.criterion = nn.CrossEntropyLoss()
@@ -202,7 +265,7 @@ class Worker(object):
         gradient_time = np.array(self.gradient_time)
         return str(self.worker_index), arrival_time, gradient_time
 
-    async def compute_gradients(self, weights, itr):
+    def compute_gradients(self, weights, itr):
         batch_start = time.time()
 
         for i, param in enumerate(self.net.parameters()):
@@ -219,7 +282,7 @@ class Worker(object):
         for param in self.net.parameters():
             grads.append(param.grad.data.numpy())
 
-        del self.batches[itr], data, target
+        del self.batches[itr], data, target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
         #print("worker {} gradient of batch {} computed".format(self.worker_index, itr))
         return grads
@@ -236,36 +299,6 @@ class Worker(object):
     def terminate(self):
         self.running = False;
 
-class pricing():
-    def __init__(self, distr):
-        self.distr = distr
-        self.price = self.distr.start_price()
-
-    async def price_generator(self, workers, bid1, bid2=None, n2=0):
-        n1 = len(workers) - n2
-        status1 = True
-        status2 = True
-        while True:
-            if bid2:
-                if bid2 > self.price and status2:
-                    for w in workers[-n2:]:
-                        w.preempt.remote()
-                    status2 = False
-                elif bid2 <= self.price and not status2:
-                    for w in workers[-n2:]:
-                        w.restart.remote()
-                    status2 = True
-            if bid1 > self.price and status1:
-                for w in workers[:n1]:
-                    w.preempt.remote()
-                status1 = False
-            elif bid1 <= self.price and not status1:
-                for w in workers[:n1]:
-                    w.restart.remote()
-                status1 = True
-
-            self.price = self.distr.get_price()
-
 parser = argparse.ArgumentParser(description='PyTorch K-sync SGD')
 parser.add_argument('--name','-n', default="default", type=str, help='experiment name, used for saving results')
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
@@ -273,7 +306,7 @@ parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
 parser.add_argument('--l', default=0.005, type=int, help='arrival rate of an individual data point')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
-parser.add_argument('--test', default=100, type=int, help='number of batches per accuracy check')
+parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
 parser.add_argument('--R', default=8, type=int, help='number of returned workers')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
@@ -285,9 +318,13 @@ if __name__ == "__main__":
     now = datetime.now()
     run_id = now.strftime("%Y%m%d%H%M%S") # RUN ID
 
+    # Pricing Model
+    #pricing = Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
+    pricing = Gaussian_Pricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
+
     # Initialize workers and parameter server
     testset = get_testset()
-    ps = ParameterServer.remote(k=args.K, t=args.test)
+    ps = ParameterServer.remote(pricing, k=args.K, t=args.test)
     ts = TestServer.remote(testset)
     workers = []
     for i in range(args.size):
@@ -297,13 +334,16 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
+    # Run workers and other remote processes
     processes = []
     processes.append(ps.queue_processor.remote(workers, ts, start_time))
+    #processes.append(ps.price_generator.remote(1))
     processes.append(ts.test_processor.remote())
     for w in workers:
         processes.append(w.batch_generator.remote(start_time))
     print("processes launched")
 
+    # Main loop
     print("waiting for the end of time")
     while True:
         cmd = input(">>>")
@@ -316,6 +356,7 @@ if __name__ == "__main__":
             ts.terminate.remote()
             print("all actors terminated")
             break
+        '''
         #PREEMPT ALL WORKERS
         elif cmd == 's':
             for w in workers:
@@ -324,7 +365,9 @@ if __name__ == "__main__":
         elif cmd == 'r':
             for w in workers:
                 w.restart.remote()
+        '''
 
+    # Runs on termination
     path = os.path.join('runs', run_id)
     if not os.path.exists(path):
         os.makedirs(path)
