@@ -6,6 +6,7 @@ import argparse
 import time
 from datetime import datetime
 import os
+import json
 
 import torch
 import torch.optim as optim
@@ -160,11 +161,13 @@ class ParameterServer(object):
 
 @ray.remote(num_cpus=4)
 class TestServer(object):
-    def __init__(self, testset):
+    def __init__(self, testset, target=None):
         self.processed = 0
         self.weights = {}
         self.queue = asyncio.Queue()
         self.accuracy = []
+        self.target = target
+        self.target_itr = -1
 
         #dataset
         self.net = Net()
@@ -193,6 +196,12 @@ class TestServer(object):
             print("ACCURACY AFTER {} BATCHES: {}".format(self.processed, acc))
             self.accuracy.append([self.processed, acc])
 
+            if self.target and len(self.accuracy) >= 10 and self.target_itr < 0:
+                last_10_acc = np.mean(np.array([a[1] for a in self.accuracy[-10:]]))
+                if last_10_acc > self.target * 100:
+                    self.target_itr = self.processed
+                    print("TARGET OF {}% REACHED AFTER {} BATCHES AT {}%".format(self.target*100, self.target_itr, last_10_acc))
+
     def get_acc(self):
         self.net.eval()
         top1 = AverageMeter()
@@ -207,6 +216,7 @@ class TestServer(object):
 
     def terminate(self):
         self.queue.put_nowait("stop")
+        return {"target_itr": self.target_itr}
 
 ##################################################################
 # worker
@@ -300,13 +310,14 @@ class Worker(object):
         self.running = False;
 
 parser = argparse.ArgumentParser(description='PyTorch K-sync SGD')
-parser.add_argument('--name','-n', default="default", type=str, help='experiment name, used for saving results')
+parser.add_argument('--name','-n', default=None, type=str, help='experiment name, used for saving results')
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 #parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
-parser.add_argument('--l', default=0.005, type=int, help='arrival rate of an individual data point')
+parser.add_argument('--l', default=0.005, type=float, help='arrival rate of an individual data point')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
+parser.add_argument('--target', default=0.7, type=float, help='target accuracy')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
 parser.add_argument('--R', default=8, type=int, help='number of returned workers')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
@@ -315,17 +326,25 @@ args = parser.parse_args()
 if __name__ == "__main__":
 
     # Initialize datalogging
-    now = datetime.now()
-    run_id = now.strftime("%Y%m%d%H%M%S") # RUN ID
+    if not args.name:
+        now = datetime.now()
+        args.name = now.strftime("%Y%m%d%H%M%S") # RUN ID
+    stats = vars(args)
 
     # Pricing Model
     #pricing = Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
     pricing = Gaussian_Pricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
+    stats["pricing"] = pricing.get_stats()
+
+    #bids
+    bids = {"bid1": 0.303030} # ONE BID
+    #bids = {"bid1": 10, "bid2": 100, "n2": 2} # TWO BIDS
+    stats["bids"] = bids
 
     # Initialize workers and parameter server
     testset = get_testset()
     ps = ParameterServer.remote(pricing, k=args.K, t=args.test)
-    ts = TestServer.remote(testset)
+    ts = TestServer.remote(testset, target=args.target)
     workers = []
     for i in range(args.size):
         trainset = partition_dataset(i, args.size, args.bs)
@@ -337,7 +356,7 @@ if __name__ == "__main__":
     # Run workers and other remote processes
     processes = []
     processes.append(ps.queue_processor.remote(workers, ts, start_time))
-    #processes.append(ps.price_generator.remote(1))
+    processes.append(ps.price_generator.remote(**bids))
     processes.append(ts.test_processor.remote())
     for w in workers:
         processes.append(w.batch_generator.remote(start_time))
@@ -353,7 +372,8 @@ if __name__ == "__main__":
             for w in workers:
                 w.terminate.remote()
             ps.terminate.remote()
-            ts.terminate.remote()
+            test_stats = ray.get(ts.terminate.remote())
+            stats.update(test_stats)
             print("all actors terminated")
             break
         '''
@@ -368,7 +388,7 @@ if __name__ == "__main__":
         '''
 
     # Runs on termination
-    path = os.path.join('runs', run_id)
+    path = os.path.join('runs', args.name)
     if not os.path.exists(path):
         os.makedirs(path)
     for p in processes:
@@ -377,3 +397,6 @@ if __name__ == "__main__":
         with open(os.path.join(path, "{}.npy".format(logs[0])), 'wb') as f:
             for i in range(1, len(logs)):
                 np.save(f, logs[i])
+    with open(os.path.join(path, "stats.json"), 'w') as f:
+        json.dump(stats, f)
+    print("run {} terminated".format(args.name))

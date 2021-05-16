@@ -1,7 +1,6 @@
 import numpy as np
 import os
-from scipy.stats import norm, truncnorm
-from scipy.optimize import fmin_slsqp
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 
 timestamp = "20210514072412"
@@ -17,7 +16,8 @@ print(c[-5:, :])
 
 update_interval = np.diff(c[:, 1])
 #print(np.min(update_interval), np.max(update_interval))
-#print(np.mean(update_interval), np.median(update_interval))
+R = np.mean(update_interval)
+print(R)
 
 n, bins, patches = plt.hist(update_interval, 1000, density=True)
 mu, sigma = norm.fit(update_interval)

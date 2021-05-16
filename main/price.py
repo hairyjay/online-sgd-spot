@@ -22,6 +22,13 @@ class Uniform_Pricing(object):
 
         return random.uniform(self.min_p, self.max_p), interval
 
+    def get_stats(self):
+        return {"distribution": "uniform",
+                "price_min": self.min_p,
+                "price_max": self.max_p,
+                "update_time_mean": self.update_mean,
+                "update_time_var": self.update_var if self.update_var else 0}
+
 class Gaussian_Pricing(object):
     def __init__(self, p_mean, p_var, update_mean, update_var=None):
         self.p_mean = p_mean
@@ -40,3 +47,10 @@ class Gaussian_Pricing(object):
                 interval = random.normal(self.update_mean, self.update_var)
 
         return random.normal(self.p_mean, self.p_var), interval
+
+    def get_stats(self):
+        return {"distribution": "gaussian",
+                "price_mean": self.p_mean,
+                "price_var": self.p_var,
+                "update_time_mean": self.update_mean,
+                "update_time_var": self.update_var if self.update_var else 0}
