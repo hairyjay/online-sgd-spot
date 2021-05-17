@@ -28,7 +28,7 @@ ray.init(address="auto")
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, price_distr, l=0.005, k=5, t=100):
+    def __init__(self, l=0.005, k=5, t=100):
         self.params = 0
         self.l = l
         self.k = k
@@ -41,10 +41,8 @@ class ParameterServer(object):
         self.arrival_time = []
         self.gradient_time = []
         self.update_time = []
-        self.price_distr = price_distr
-        self.price = self.price_distr.start_price()
+        self.choice_log = []
         self.running = True
-        self.price_log = []
 
         self.net = Net()
         print("param server init")
@@ -109,47 +107,23 @@ class ParameterServer(object):
         test_server.test_acc.remote(weights, self.processed)
         del weights
 
-    async def price_generator(self, bid1, bid2=None, n2=0):
-        if bid2:
-            if bid2 < bid1:
-                raise ValueError('bid2 cannot be lower than bid1')
-        n1 = len(self.workers) - n2
-        status1 = True
-        status2 = True
-        last_update = time.time() - self.start_time
-        self.price_log.append([last_update, self.price])
-        print("starting price set to {}".format(self.price))
+    async def rand_preempt(self, preemption, refresh_time):
 
         while self.running:
-            if bid2:
-                if bid2 < self.price and status2:
-                    for w in self.workers[-n2:]:
-                        w.preempt.remote()
-                    status2 = False
-                    print("n2 preempted due to pricing")
-                elif bid2 >= self.price and not status2:
-                    for w in self.workers[-n2:]:
-                        w.restart.remote()
-                    status2 = True
-                    print("n2 restarted due to pricing")
-            if bid1 < self.price and status1:
-                for w in self.workers[:n1]:
-                    w.preempt.remote()
-                status1 = False
-                print("n1 preempted due to pricing")
-            elif bid1 >= self.price and not status1:
-                for w in self.workers[:n1]:
-                    w.restart.remote()
-                status1 = True
-                print("n1 restarted due to pricing")
-
-            self.price, interval = self.price_distr.get_price()
-            await asyncio.sleep(interval)
             last_update = time.time() - self.start_time
-            self.price_log.append([last_update, self.price])
-            print("price changed to {}".format(self.price))
+            choice = preemption.choose(self.workers)
+            self.choice_log.append([last_update, len(choice)])
+            n_choice = [w for w in self.workers if w not in choice]
+            print("preempt list updated")
 
-        return 'price', np.array(self.price_log)
+            for c in choice:
+                c.preempt.remote()
+            for c in n_choice:
+                c.restart.remote()
+
+            await asyncio.sleep(refresh_time)
+
+        return 'price', np.array(self.choice_log)
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -316,7 +290,7 @@ parser.add_argument('--K', default=5, type=int, help='number of batches per upda
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0.7, type=float, help='target accuracy')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
-parser.add_argument('--R', default=8, type=int, help='number of returned workers')
+parser.add_argument('--refresh', default=100, type=int, help='time between preemptions checks')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
 args = parser.parse_args()
 
@@ -328,21 +302,17 @@ if __name__ == "__main__":
         args.name = now.strftime("%Y%m%d%H%M%S") # RUN ID
     stats = vars(args)
 
-    # Pricing Model
-    pricing = Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
-    #pricing = Gaussian_Pricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
-    stats["pricing"] = pricing.get_stats()
-
-    #bids
-    #bids = {"bid1": 0.675377277376705} # ONE BID - GAUSSIAN SYNTHETIC
-    bids = {"bid1": 0.7333333333333334} # ONE BID - UNIFORM SYNTHETIC
-    #bids = {"bid1": 10, "bid2": 100, "n2": 2} # TWO BIDS
-    stats["bids"] = bids
+    #bids and preemption
+    stats["pricing"] = None
+    stats["bids"] = None
+    preemption = Binomial_Preemption(0.7)
+    #preemption = Uniform_Preemption(0.7)
+    stats["preempt"] = preemption.get_info()
     print(stats)
 
     # Initialize workers and parameter server
     testset = get_testset()
-    ps = ParameterServer.remote(pricing, k=args.K, t=args.test)
+    ps = ParameterServer.remote(k=args.K, t=args.test)
     ts = TestServer.remote(testset, target=args.target)
     workers = []
     for i in range(args.size):
@@ -355,7 +325,7 @@ if __name__ == "__main__":
     # Run workers and other remote processes
     processes = []
     processes.append(ps.queue_processor.remote(workers, ts, start_time))
-    processes.append(ps.price_generator.remote(**bids))
+    processes.append(ps.rand_preempt.remote(preemption, args.refresh))
     processes.append(ts.test_processor.remote())
     for w in workers:
         processes.append(w.batch_generator.remote(start_time))

@@ -54,3 +54,26 @@ class Gaussian_Pricing(object):
                 "price_var": self.p_var,
                 "update_time_mean": self.update_mean,
                 "update_time_var": self.update_var if self.update_var else 0}
+
+class Binomial_Preemption(object):
+    def __init__(self, q):
+        self.q = q
+
+    def choose(self, items):
+        choice = random.binomial(size=len(items), n=1, p=self.q)
+        return [i for i, c in zip(items, choice) if c]
+
+    def get_info(self):
+        return {"distribution": "binomial",
+                "q": self.q}
+
+class Uniform_Preemption(object):
+    def __init__(self):
+        return
+
+    def choose(self, items):
+        n = random.randint(low=1, high=len(items))
+        return random.choice(items, n, replace=False)
+
+    def get_info(self):
+        return {"distribution": "uniform"}
