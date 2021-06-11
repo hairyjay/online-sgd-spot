@@ -306,7 +306,7 @@ if __name__ == "__main__":
     stats["pricing"] = None
     stats["bids"] = None
     preemption = Binomial_Preemption(0.7)
-    #preemption = Uniform_Preemption(0.7)
+    #preemption = Uniform_Preemption()
     stats["preempt"] = preemption.get_info()
     print(stats)
 

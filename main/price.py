@@ -2,6 +2,7 @@ import numpy as np
 import numpy.random as random
 import asyncio
 import time
+import os
 
 class Uniform_Pricing(object):
     def __init__(self, min_p, max_p, update_mean, update_var=None):
@@ -54,6 +55,43 @@ class Gaussian_Pricing(object):
                 "price_var": self.p_var,
                 "update_time_mean": self.update_mean,
                 "update_time_var": self.update_var if self.update_var else 0}
+
+class Trace_Pricing(object):
+    def __init__(self, filename, scale=1):
+        with open(os.path.join("price-trace", filename), 'rb') as f:
+            self.trace = np.load(f)
+            self.trace[1, :] /= scale
+        self.filename = filename
+        self.scale = scale
+        self.i = 0
+
+    def start_price(self):
+        return self.trace[0, 0]
+
+    def get_price(self):
+        self.i += 1
+        if self.i >= self.trace.shape[1]:
+            self.i = 0
+        return self.trace[0, self.i], self.trace[1, self.i]
+
+    def get_stats(self):
+        return {"distribution": "trace",
+                "filename": self.filename,
+                "scale": self.scale}
+
+class Fixed_Pricing(object):
+    def __init__(self, p):
+        self.p = p
+
+    def start_price(self):
+        return self.p
+
+    def get_price(self):
+        return self.p, False
+
+    def get_stats(self):
+        return {"distribution": "fixed",
+                "price": self.p}
 
 class Binomial_Preemption(object):
     def __init__(self, q):

@@ -144,6 +144,8 @@ class ParameterServer(object):
                 print("n1 restarted due to pricing")
 
             self.price, interval = self.price_distr.get_price()
+            if interval == False:
+                break
             await asyncio.sleep(interval)
             last_update = time.time() - self.start_time
             self.price_log.append([last_update, self.price])
@@ -253,9 +255,7 @@ class Worker(object):
         while self.running:
             # SIMULATE MINI-BATCH INTER-ARRIVAL TIME
             wait_time = random.gamma(self.B, self.l)
-            #print("wait time: {}".format(wait_time))
             await asyncio.sleep(wait_time)
-            #print("WORKER {} BATCH {} ARRIVED".format(self.worker_index, self.curritr))
 
             # SIGNAL PARAMETER SERVER
             try:
@@ -294,7 +294,6 @@ class Worker(object):
 
         del self.batches[itr], data, target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
-        #print("worker {} gradient of batch {} computed".format(self.worker_index, itr))
         return grads
 
     def preempt(self):
@@ -329,13 +328,17 @@ if __name__ == "__main__":
     stats = vars(args)
 
     # Pricing Model
-    pricing = Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
+    #pricing = Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
     #pricing = Gaussian_Pricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
+    #pricing = Trace_Pricing("ca-central-1b_S.npy", scale=500) # TRACE "ca-central-1b_S.npy"
+    pricing = Fixed_Pricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
     #bids
     #bids = {"bid1": 0.675377277376705} # ONE BID - GAUSSIAN SYNTHETIC
-    bids = {"bid1": 0.7333333333333334} # ONE BID - UNIFORM SYNTHETIC
+    #bids = {"bid1": 0.7333333333333334} # ONE BID - UNIFORM SYNTHETIC
+    #bids = {"bid1": 0.1606} # ONE BID - TRACE "ca-central-1b_S.npy"
+    bids = {"bid1": 0.286} # FIXED PRICE
     #bids = {"bid1": 10, "bid2": 100, "n2": 2} # TWO BIDS
     stats["bids"] = bids
     print(stats)

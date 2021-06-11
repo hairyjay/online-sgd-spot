@@ -2,35 +2,41 @@ import numpy as np
 import os
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+import json
 
-timestamp = "20210514072412"
+#timestamp = "20210514072412"
 
 def get_acc_trace(timestamp):
-    run_folder = os.path.join('../', 'runs', timestamp)
-    with open(os.path.join(run_folder, 'ts.npy'), 'rb') as f:
+    with open(os.path.join(timestamp, 'ts.npy'), 'rb') as f:
         a = np.load(f)
-    return a
+        return a
 
-a_a = get_acc_trace("20210502170139")
-a_b = get_acc_trace("20210503104623")
-a_c = get_acc_trace("20210503125329")
-a_d = get_acc_trace("20210513120643")
+ax = plt.gca()
+i = 0
+thr = []
+for run in os.scandir(os.path.join('../', 'runs')):
+    if os.path.isdir(run):
+        if os.path.exists(os.path.join(run, "stats.json")):
 
-a_0 = get_acc_trace("20210514072412")
-a_1 = get_acc_trace("20210514211841")
-a_2 = get_acc_trace("20210515085609")
+            color = next(ax._get_lines.prop_cycler)['color']
+            a = get_acc_trace(run)
+            plt.plot(a[:, 0], a[:, 1], color=color)
 
-plt.plot(a_a[:, 0], a_a[:, 1])
-plt.plot(a_b[:, 0], a_b[:, 1])
-plt.plot(a_c[:, 0], a_c[:, 1])
-plt.plot(a_d[:, 0], a_d[:, 1])
+            with open(os.path.join(run, "stats.json")) as json_file:
+                data = json.load(json_file)
+                threshold = data["target_itr"]
+                thr.append(threshold)
+                plt.vlines(threshold, ymin=0, ymax=100, color=color, linestyle='dashed', label="threshold @ {} iterations".format(threshold))
+            i += 1
 
-plt.plot(a_0[:, 0], a_0[:, 1])
-plt.plot(a_1[:, 0], a_1[:, 1])
-plt.plot(a_2[:, 0], a_2[:, 1])
+thr = np.array(thr)
+#print(np.mean(thr), np.var(thr), np.std(thr))
 
-plt.xlabel('Batches Arrived')
-plt.ylabel('Probability')
-plt.title('Accuracy')
-plt.grid(True)
+plt.xlabel('Batches Arrived $\\frac{J}{K}$')
+plt.ylabel('Accuracy (%)')
+plt.title('Accuracy of model in relation to number of batches arrived')
+#plt.grid(True)
+plt.xlim(0, 800000)
+plt.ylim(0, 80)
+#plt.legend()
 plt.show()
