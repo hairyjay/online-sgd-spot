@@ -234,6 +234,7 @@ class Worker(object):
         self.B = B
         self.l = l
         self.lr = lr
+        self.queue = asyncio.Queue()
 
         self.running = True
         self.preempt = False
@@ -274,6 +275,17 @@ class Worker(object):
         arrival_time = np.array(self.arrival_time)
         gradient_time = np.array(self.gradient_time)
         return str(self.worker_index), arrival_time, gradient_time
+
+    async def queue_processor(self, start_time):
+        for i in range(self.B):
+            b = await self.queue.get()
+            if b == "stop":
+                arrival_time = np.array(self.arrival_time)
+                gradient_time = np.array(self.gradient_time)
+                update_time = np.array(self.update_time)
+                return 'ps', arrival_time, gradient_time, update_time
+            batches.append(b)
+            self.queue.task_done()
 
     def compute_gradients(self, weights, itr):
         batch_start = time.time()
