@@ -28,7 +28,7 @@ ray.init(address="auto")
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, price_distr, l=0.005, k=5, t=100):
+    def __init__(self, net, price_distr, l=0.005, k=5, t=100):
         self.params = 0
         self.l = l
         self.k = k
@@ -46,7 +46,7 @@ class ParameterServer(object):
         self.running = True
         self.price_log = []
 
-        self.net = Net()
+        self.net = net()
         print("param server init")
 
     def signal(self, worker_index, itr):
@@ -77,10 +77,7 @@ class ParameterServer(object):
                 weights.append(param.data)
             w_ref = ray.put(weights)
 
-            #tasks = [self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches]
-            #grad = ray.get(tasks)
             grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches])
-            #grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(weights, b[1]) for b in batches])
 
             self.apply_gradients(grad)
             del batches, weights, w_ref, grad#, tasks
@@ -163,53 +160,50 @@ class ParameterServer(object):
 
 @ray.remote(num_cpus=4)
 class TestServer(object):
-    def __init__(self, testset, target=None):
+    def __init__(self, net):
         self.processed = 0
         self.weights = {}
         self.queue = asyncio.Queue()
-        self.accuracy = []
-        self.target = target
         self.target_itr = -1
-
-        #dataset
-        self.net = Net()
-        self.test_loader = torch.utils.data.DataLoader(testset,
-                                            batch_size=128,
-                                            shuffle=False)
+        self.net = net()
         print("test server init")
 
     def test_acc(self, weights, itr):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def test_processor(self):
+    async def test_processor(self, get_testset, target_acc=None):
+        testset = get_testset()
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False)
+        accuracy = []
+
         while True:
             itr = await self.queue.get()
             self.queue.task_done()
             if itr == "stop":
-                return 'ts', np.array(self.accuracy)
+                return 'ts', np.array(accuracy)
 
             for i, param in enumerate(self.net.parameters()):
                 param.data = self.weights[itr][i]
             del self.weights[itr]
 
             self.processed = itr
-            acc = self.get_acc()
+            acc = self.get_acc(test_loader)
             print("ACCURACY AFTER {} BATCHES: {}".format(self.processed, acc))
-            self.accuracy.append([self.processed, acc])
+            accuracy.append([self.processed, acc])
 
-            if self.target and len(self.accuracy) >= 10 and self.target_itr < 0:
-                last_10_acc = np.mean(np.array([a[1] for a in self.accuracy[-10:]]))
-                if last_10_acc > self.target * 100:
+            if target_acc and len(accuracy) >= 10 and self.target_itr < 0:
+                last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
+                if last_10_acc > target_acc * 100:
                     self.target_itr = self.processed
-                    print("TARGET OF {}% REACHED AFTER {} BATCHES AT {}%".format(self.target*100, self.target_itr, last_10_acc))
+                    print("TARGET OF {}% REACHED AFTER {} BATCHES AT {}%".format(target_acc * 100, self.target_itr, last_10_acc))
 
-    def get_acc(self):
+    def get_acc(self, test_loader):
         self.net.eval()
         top1 = AverageMeter()
         # correct = 0
         # total = 0
-        for batch_idx, (inputs, targets) in enumerate(self.test_loader):
+        for batch_idx, (inputs, targets) in enumerate(test_loader):
             # inputs, targets = inputs.cuda(non_blocking=True), targets.cuda(non_blocking=True)
             outputs = self.net(inputs)
             acc1 = comp_accuracy(outputs, targets)
@@ -226,13 +220,13 @@ class TestServer(object):
 
 @ray.remote(num_cpus=4)
 class Worker(object):
-    def __init__(self, worker_index, ps, trainset, B=32, l=0.001, lr=0.03):
+    def __init__(self, worker_index, size, ps, net, B=32, lr=0.03):
         self.worker_index = worker_index
+        self.size = size
         self.ps = ps
         self.curritr = 0
         self.batches = {}
         self.B = B
-        self.l = l
         self.lr = lr
         self.queue = asyncio.Queue()
 
@@ -240,52 +234,56 @@ class Worker(object):
         self.preempt = False
         self.arrival_time = []
         self.gradient_time = []
-
-        self.train_loader = torch.utils.data.DataLoader(trainset,
-                                            batch_size=B,
-                                            shuffle=True)
-        self.iterator = iter(self.train_loader)
-        self.net = Net()
+        self.net = net()
         self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
         self.criterion = nn.CrossEntropyLoss()
         self.trainacc = AverageMeter()
         self.accs = []
         print("worker {} init".format(self.worker_index))
 
-    async def batch_generator(self, start_time):
+    async def input_generator(self, get_trainset, t=0.001):
+        trainset = get_trainset(self.worker_index, self.size)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True)
+        iterator = iter(train_loader)
+
         while self.running:
-            # SIMULATE MINI-BATCH INTER-ARRIVAL TIME
-            wait_time = random.gamma(self.B, self.l)
+            # SIGNAL QUEUE
+            try:
+                data, target = next(iterator)
+            except StopIteration:
+                iterator = iter(train_loader)
+                data, target = next(iterator)
+            self.signal(data, target)
+
+            # SIMULATE DATA INTER-ARRIVAL TIME
+            wait_time = random.exponential(t)
             await asyncio.sleep(wait_time)
 
-            # SIGNAL PARAMETER SERVER
-            try:
-                data, target = next(self.iterator)
-            except StopIteration:
-                self.iterator = iter(self.train_loader)
-                data, target = next(self.iterator)
+    def signal(self, data, target):
+        self.queue.put_nowait((data, target))
+        return True
+
+    async def queue_processor(self, start_time):
+        while True:
+            data, target = [], []
+            for i in range(self.B):
+                d, t = await self.queue.get()
+                if d == "stop":
+                    arrival_time = np.array(self.arrival_time)
+                    gradient_time = np.array(self.gradient_time)
+                    return str(self.worker_index), arrival_time, gradient_time
+                data.append(d)
+                target.append(t)
+                self.queue.task_done()
 
             if not self.preempt:
+                data = torch.cat(data, 0)
+                target = torch.cat(target, 0)
                 self.batches[self.curritr] = (data, target)
                 self.arrival_time.append([self.curritr, time.time() - start_time])
 
                 self.ps.signal.remote(self.worker_index, self.curritr)
                 self.curritr += 1
-
-        arrival_time = np.array(self.arrival_time)
-        gradient_time = np.array(self.gradient_time)
-        return str(self.worker_index), arrival_time, gradient_time
-
-    async def queue_processor(self, start_time):
-        for i in range(self.B):
-            b = await self.queue.get()
-            if b == "stop":
-                arrival_time = np.array(self.arrival_time)
-                gradient_time = np.array(self.gradient_time)
-                update_time = np.array(self.update_time)
-                return 'ps', arrival_time, gradient_time, update_time
-            batches.append(b)
-            self.queue.task_done()
 
     def compute_gradients(self, weights, itr):
         batch_start = time.time()
@@ -315,6 +313,7 @@ class Worker(object):
         self.preempt = False
 
     def terminate(self):
+        self.queue.put_nowait(("stop", None))
         self.running = False;
 
 parser = argparse.ArgumentParser(description='PyTorch K-sync SGD')
@@ -322,12 +321,11 @@ parser.add_argument('--name','-n', default=None, type=str, help='experiment name
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 #parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
-parser.add_argument('--l', default=0.005, type=float, help='arrival rate of an individual data point')
+parser.add_argument('--t', default=0.005, type=float, help='mean inter-arrival time of an individual data point')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0.7, type=float, help='target accuracy')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
-parser.add_argument('--R', default=8, type=int, help='number of returned workers')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
 args = parser.parse_args()
 
@@ -356,13 +354,11 @@ if __name__ == "__main__":
     print(stats)
 
     # Initialize workers and parameter server
-    testset = get_testset()
-    ps = ParameterServer.remote(pricing, k=args.K, t=args.test)
-    ts = TestServer.remote(testset, target=args.target)
+    ps = ParameterServer.remote(Net, pricing, k=args.K, t=args.test)
+    ts = TestServer.remote(Net)
     workers = []
     for i in range(args.size):
-        trainset = partition_dataset(i, args.size, args.bs)
-        workers.append(Worker.remote(i, ps, trainset, B=args.bs, l=args.l, lr=args.lr))
+        workers.append(Worker.remote(i, args.size, ps, Net, B=args.bs, lr=args.lr))
     print("servers launched")
 
     start_time = time.time()
@@ -371,9 +367,10 @@ if __name__ == "__main__":
     processes = []
     processes.append(ps.queue_processor.remote(workers, ts, start_time))
     processes.append(ps.price_generator.remote(**bids))
-    processes.append(ts.test_processor.remote())
-    for w in workers:
-        processes.append(w.batch_generator.remote(start_time))
+    testset = get_testset()
+    processes.append(ts.test_processor.remote(get_testset, target_acc=args.target))
+    for i, w in enumerate(workers):
+        processes.extend([w.input_generator.remote(partition_dataset, t=args.t), w.queue_processor.remote(start_time)])
     print("processes launched")
 
     # Main loop
@@ -407,10 +404,11 @@ if __name__ == "__main__":
         os.makedirs(path)
     for p in processes:
         logs = ray.get(p)
-        print(logs[0])
-        with open(os.path.join(path, "{}.npy".format(logs[0])), 'wb') as f:
-            for i in range(1, len(logs)):
-                np.save(f, logs[i])
+        if logs is not None:
+            print(logs[0])
+            with open(os.path.join(path, "{}.npy".format(logs[0])), 'wb') as f:
+                for i in range(1, len(logs)):
+                    np.save(f, logs[i])
     with open(os.path.join(path, "stats.json"), 'w') as f:
         json.dump(stats, f)
     print("run {} terminated".format(args.name))

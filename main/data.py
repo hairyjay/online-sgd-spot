@@ -41,12 +41,7 @@ class DataPartitioner(object):
     def use(self, partition):
         return Partition(self.data, self.partitions[partition])
 
-def partition_dataset(rank, size, bsz):
-    print('==> load train data')
-    # transform=transforms.Compose([
-    #    transforms.ToTensor(),
-    #    transforms.Normalize((0.1307,), (0.3081,))
-    # ])
+def partition_dataset(rank, size):
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -75,13 +70,6 @@ def get_testset():
                                         transform=transform_test)
 
     return testset
-
-'''
-norm_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize((0.1307,), (0.3081,))
-])
-'''
 
 def comp_accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
