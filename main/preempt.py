@@ -9,6 +9,7 @@ import json
 
 import price
 import cifar
+import emnist
 
 ##################################################################
 # Start ray cluster
@@ -31,20 +32,17 @@ args = parser.parse_args()
 
 if __name__ == "__main__":
 
-    # Initialize datalogging
     if not args.name:
         now = datetime.now()
         args.name = now.strftime("%Y%m%d%H%M%S") # RUN ID
     stats = vars(args)
 
-    # Pricing Model
     #pricing = price.Uniform_Pricing(0.2, 1, 10) # UNIFORM SYNTHETIC
     #pricing = price.Gaussian_Pricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
     #pricing = price.Trace_Pricing("ca-central-1b_S.npy", scale=500) # TRACE "ca-central-1b_S.npy"
     pricing = price.Fixed_Pricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
-    #bids
     #bids = {"bid1": 0.675377277376705} # ONE BID - GAUSSIAN SYNTHETIC
     #bids = {"bid1": 0.7333333333333334} # ONE BID - UNIFORM SYNTHETIC
     #bids = {"bid1": 0.1606} # ONE BID - TRACE "ca-central-1b_S.npy"
@@ -53,46 +51,30 @@ if __name__ == "__main__":
     stats["bids"] = bids
     print(stats)
 
-    # Initialize workers and parameter server
-    #ps = ParameterServer.remote(Net, pricing, k=args.K, t=args.test)
-    #ts = TestServer.remote(Net)
-    #workers = []
-    #for i in range(args.size):
-    #    workers.append(Worker.remote(i, args.size, ps, Net, B=args.bs, lr=args.lr))
-    experiment = cifar.CIFARShards(args, pricing)
+    # INITIALIZE WORKERS AND PARAMETER SERVER
+    #experiment = cifar.CIFARShards(args, pricing)
+    experiment = emnist.EMNISTShards(args, pricing)
     print("servers launched")
 
     start_time = time.time()
 
-    # Run workers and other remote processes
-    #processes = []
-    #processes.append(ps.queue_processor.remote(workers, ts, start_time))
-    #processes.append(ps.price_generator.remote(**bids))
-    #testset = get_testset()
-    #processes.append(ts.test_processor.remote(get_testset, target_acc=args.target))
-    #for i, w in enumerate(workers):
-    #    processes.extend([w.input_generator.remote(partition_dataset, t=args.t), w.queue_processor.remote(start_time)])
+    # RUN WORKERS AND OTHER REMOTE PROCESSES
     experiment.run(start_time, bids)
     print("processes launched")
 
-    # Main loop
-    print("waiting for the end of time")
+    # CONTROLS
     while True:
         cmd = input(">>>")
-
         #KILL
         if cmd == 'k':
-            #for w in workers:
-            #    w.terminate.remote()
-            #ps.terminate.remote()
-            #test_stats = ray.get(ts.terminate.remote())
             test_stats = experiment.terminate()
             stats.update(test_stats)
             print("all actors terminated")
             break
 
-    # Runs on termination
+    # ON TERMINATION
     logs = experiment.save_logs()
+
     path = os.path.join('runs', args.name)
     if not os.path.exists(path):
         os.makedirs(path)
@@ -103,13 +85,6 @@ if __name__ == "__main__":
             with open(os.path.join(path, "{}.npy".format(l[0])), 'wb') as f:
                 for i in range(1, len(l)):
                     np.save(f, l[i])
-    #for p in processes:
-        #logs = ray.get(p)
-        #if logs is not None:
-            #print(logs[0])
-            #with open(os.path.join(path, "{}.npy".format(logs[0])), 'wb') as f:
-                #for i in range(1, len(logs)):
-                    #np.save(f, logs[i])
     with open(os.path.join(path, "stats.json"), 'w') as f:
         json.dump(stats, f)
     print("run {} terminated".format(args.name))

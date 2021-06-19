@@ -30,7 +30,6 @@ class CIFARShards(shards.Shards):
             return x
 
     def __init__(self, args, pricing):
-        super().__init__(args, pricing)
         self.train_transform = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -41,7 +40,8 @@ class CIFARShards(shards.Shards):
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
-
+        super().__init__(args, pricing)
+        
     def testset(self):
         return torchvision.datasets.CIFAR10(root='~/spot_aws/data',
                                             train=False,

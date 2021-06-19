@@ -159,7 +159,7 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, target_acc=None):
+    async def valid_consumer(self, get_testset, start_time, target_acc=None):
         testset = get_testset()
         test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False)
         accuracy = []
@@ -183,7 +183,7 @@ class TestServer(object):
                 last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
                 if last_10_acc > target_acc * 100:
                     self.target_itr = self.processed
-                    print("TARGET OF {}% REACHED AFTER {} BATCHES AT {}%".format(target_acc * 100, self.target_itr, last_10_acc))
+                    print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_10_acc))
 
     def get_acc(self, test_loader):
         self.net.eval()

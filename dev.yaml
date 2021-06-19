@@ -99,6 +99,7 @@ file_mounts: {
    "~/test": "./test",
    "~/main": "./main",
    "~/price-trace": "./price-trace",
+   "~/spot_aws/data": "./datasets",
    # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/",
    #"~/spot_aws/": "/Users/jianyuw1/Downloads/ML-on-the-Cheap-master/spot_aws/",
    # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/examples/parameter_server/sync_parameter_server.py",

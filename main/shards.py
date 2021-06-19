@@ -25,7 +25,7 @@ class Shards(actors.Coordinator):
     def run(self, start_time, bids):
         self.processes.append(self.ps.queue_consumer.remote(self.workers, self.ts, start_time))
         self.processes.append(self.ps.price_producer.remote(**bids))
-        self.processes.append(self.ts.valid_consumer.remote(self.get_testset, target_acc=self.args.target))
+        self.processes.append(self.ts.valid_consumer.remote(self.get_testset, start_time, target_acc=self.args.target))
         for i, w in enumerate(self.workers):
             self.processes.extend([w.batch_producer.remote(self.get_trainset, t=self.args.t), w.batch_consumer.remote(start_time)])
 
