@@ -4,7 +4,7 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 import json
 
-#timestamp = "20210514072412"
+timestamp = "20210620082307"
 
 def get_acc_trace(timestamp):
     with open(os.path.join(timestamp, 'ts.npy'), 'rb') as f:
@@ -14,7 +14,7 @@ def get_acc_trace(timestamp):
 ax = plt.gca()
 i = 0
 thr = []
-for run in os.scandir(os.path.join('../', 'runs')):
+for run in os.scandir(os.path.join('runs')):
     if os.path.isdir(run):
         if os.path.exists(os.path.join(run, "stats.json")):
 
@@ -37,6 +37,6 @@ plt.ylabel('Accuracy (%)')
 plt.title('Accuracy of model in relation to number of batches arrived')
 #plt.grid(True)
 plt.xlim(0, 800000)
-plt.ylim(0, 80)
+plt.ylim(0, 90)
 #plt.legend()
 plt.show()

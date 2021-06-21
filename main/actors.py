@@ -152,7 +152,9 @@ class TestServer(object):
         self.weights = {}
         self.queue = asyncio.Queue()
         self.target_itr = -1
-        self.net = Net()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(self.device)
+        self.net = Net().to(self.device)
         print("test server init")
 
     def test_acc(self, weights, itr):
@@ -192,8 +194,8 @@ class TestServer(object):
         # total = 0
         for batch_idx, (inputs, targets) in enumerate(test_loader):
             # inputs, targets = inputs.cuda(non_blocking=True), targets.cuda(non_blocking=True)
-            outputs = self.net(inputs)
-            acc1 = data_tools.comp_accuracy(outputs, targets)
+            outputs = self.net(inputs.to(self.device))
+            acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
             top1.update(acc1[0], inputs.size(0))
         return top1.avg
 
@@ -220,7 +222,9 @@ class Worker(object):
         self.preempt = False
         self.arrival_time = []
         self.gradient_time = []
-        self.net = Net()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(self.device)
+        self.net = Net().to(self.device)
         self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.accs = []
@@ -274,12 +278,12 @@ class Worker(object):
         batch_start = time.time()
 
         for i, param in enumerate(self.net.parameters()):
-            param.data = weights[i]
+            param.data = weights[i].to(self.device)
 
         data, target = self.batches[itr]
         # data, target = data.cuda(), target.cuda()
-        output = self.net(data)
-        loss = self.criterion(output, target)
+        output = self.net(data.to(self.device))
+        loss = self.criterion(output, target.to(self.device))
         self.optimizer.zero_grad()
         loss.backward()
 
