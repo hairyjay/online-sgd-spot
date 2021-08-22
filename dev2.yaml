@@ -3,13 +3,13 @@ cluster_name: spot
 
 # The minimum number of workers nodes to launch in addition to the head
 # node. This number should be >= 0.
-min_workers: 65
+#min_workers: 65
 
 # The maximum number of workers nodes to launch in addition to the head
 # node. This takes precedence over min_workers.
 max_workers: 65
 
-initial_workers: 65
+#initial_workers: 65
 
 # The autoscaler will scale up the cluster to this target fraction of resource
 # usage. For example, if a cluster of 10 nodes is 100% busy and
@@ -37,11 +37,11 @@ idle_timeout_minutes: 5
 # Cloud-provider specific configuration.
 provider:
     type: aws
-    region: ca-central-1
+    region: us-east-1
     # Availability zone(s), comma-separated, that nodes may be launched in.
     # Nodes are currently spread between zones by a round-robin approach,
     # however this implementation detail should not be relied upon.
-    availability_zone: ca-central-1a, ca-central-1b, ca-central-1d
+    availability_zone: us-east-1a, us-east-1b, us-east-1c, us-east-1d, us-east-1e, us-east-1f
 
 # How Ray will authenticate with newly launched nodes.
 auth:
@@ -59,7 +59,7 @@ available_node_types:
     cpu_ps:
         node_config:
             InstanceType: m4.xlarge
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
+            ImageId: ami-0b70285e5215b80eb # Amazon Deep Learning AMI (Ubuntu) Version 42.1
             #KeyName: hhj
 
             # Set primary volume to 120 GiB
@@ -70,8 +70,8 @@ available_node_types:
 
     gpu_ts:
         node_config:
-            InstanceType: g4dn.xlarge
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
+            InstanceType: g3.4xlarge
+            ImageId: ami-0b70285e5215b80eb # Amazon Deep Learning AMI (Ubuntu) Version 42.1
             #KeyName: hhj
 
             # Set primary volume to 120 GiB
@@ -79,13 +79,13 @@ available_node_types:
                 - DeviceName: /dev/sda1
                   Ebs:
                       VolumeSize: 140
-        #min_workers: 1
+        min_workers: 1
         max_workers: 1
 
     cpu_w:
         node_config:
             InstanceType: c5.large
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
+            ImageId: ami-0b70285e5215b80eb # Amazon Deep Learning AMI (Ubuntu) Version 42.1
             #KeyName: hhj
 
             # Set primary volume to 25 GiB
@@ -93,7 +93,7 @@ available_node_types:
                 - DeviceName: /dev/sda1
                   Ebs:
                       VolumeSize: 140
-        #min_workers: 64
+        min_workers: 64
         max_workers: 64
 
 head_node_type: cpu_ps
@@ -105,6 +105,10 @@ file_mounts: {
    "~/main": "./main",
    "~/price-trace": "./price-trace",
    "~/spot_aws/data": "./datasets",
+   # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/",
+   #"~/spot_aws/": "/Users/jianyuw1/Downloads/ML-on-the-Cheap-master/spot_aws/",
+   # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/examples/parameter_server/sync_parameter_server.py",
+#    "/path2/on/remote/machine": "/path2/on/local/machine",
 }
 
 # List of shell commands to run to set up nodes.
