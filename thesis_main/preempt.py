@@ -23,17 +23,12 @@ parser.add_argument('--name','-n', default=None, type=str, help='experiment name
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 #parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
-parser.add_argument('--t', default=0.008, type=float, help='mean inter-arrival time of an individual data point')
+parser.add_argument('--t', default=0.005, type=float, help='mean inter-arrival time of an individual data point')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0, type=float, help='target accuracy')
-parser.add_argument('--J', default=195000, type=int, help='target interations')
-parser.add_argument('--d', default=5580, type=int, help='target deadline')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
-parser.add_argument('--a', default=0.95, type=float, help='spot instance availability')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
-parser.add_argument('--fixed', '-f', action='store_true', help='fixed or uniform pricing')
-parser.add_argument('--adap', '-d', action='store_true', help='adaptive method')
 parser.add_argument('--autoexit', '-e', action='store_true', help='whether to exit on its own')
 args = parser.parse_args()
 
@@ -44,21 +39,23 @@ if __name__ == "__main__":
         args.name = now.strftime("%Y%m%d%H%M%S") # RUN ID
     stats = vars(args)
 
-    # PRICING
-    #pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
-    pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
+    # PRICING AND BIDDING
+    pricing = price.UniformPricing(0.2, 1, 10) # UNIFORM SYNTHETIC
+    #pricing = price.GaussianPricing(0.6, 0.175, 10) # GAUSSIAN SYNTHETIC
+    #pricing = price.TracePricing("ca-central-1b_S.npy", scale=500) # TRACE "ca-central-1b_S.npy"
     #pricing = price.FixedPricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
-    # ALLOCATION
-    allocation = price.InstanceAllocation(args)
-    stats["allocation"] = allocation.get_stats()
+    bids = {"bid1": 0.675377277376705} # ONE BID - GAUSSIAN SYNTHETIC
+    #bids = {"bid1": 0.7333333333333334} # ONE BID - UNIFORM SYNTHETIC
+    #bids = {"bid1": 0.1606} # ONE BID - TRACE "ca-central-1b_S.npy"
+    #bids = {"bid1": 0.286} # FIXED PRICE
+    #bids = {"bid1": 10, "bid2": 100, "n2": 2} # TWO BIDS
+    stats["bids"] = bids
 
-    # DATA RATES
-    if args.fixed:
-        rate_dist = rates.FixedRates(args.t)
-    else:
-        rate_dist = rates.UniformRates(args.t)
+    # HETEROGENEOUS RATES
+    #rate_dist = rates.FixedRates(args.t)
+    rate_dist = rates.UniformRates(args.t)
     stats["rate_dist"] = rate_dist.get_stats()
     print(stats)
 
@@ -70,7 +67,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # RUN WORKERS AND OTHER REMOTE PROCESSES
-    experiment.run(start_time, allocation, rate_dist=rate_dist)
+    experiment.run(start_time, bids, rate_dist=rate_dist)
     print("processes launched")
 
     if args.autoexit:

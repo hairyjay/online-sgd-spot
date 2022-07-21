@@ -6,7 +6,6 @@ import time
 
 import torch
 import torch.optim as optim
-import torch.multiprocessing as mp
 
 import data_tools
 import price
@@ -17,12 +16,11 @@ import price
 
 @ray.remote(num_cpus=2)
 class ParameterServer(object):
-    def __init__(self, Net, price_distr, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, Net, price_distr, l=0.005, k=5, t=100):
         self.params = 0
-        self.lr = lr
+        self.l = l
         self.k = k
         self.t = t
-        self.b = B
         self.queue = asyncio.Queue()
         self.processed = 0
         self.workers = None
@@ -32,10 +30,9 @@ class ParameterServer(object):
         self.gradient_time = []
         self.update_time = []
         self.price_distr = price_distr
+        self.price = self.price_distr.start_price()
         self.running = True
-        self.cost_log = []
-
-        self.arrival_count = None
+        self.price_log = []
 
         self.net = Net()
         print("param server init")
@@ -48,7 +45,6 @@ class ParameterServer(object):
     async def queue_consumer(self, workers, test_server, start_time):
         self.workers = workers
         self.start_time = start_time
-        self.arrival_count = np.zeros(len(self.workers))
 
         while True:
             batches = []
@@ -60,7 +56,6 @@ class ParameterServer(object):
                     update_time = np.array(self.update_time)
                     return 'ps', arrival_time, gradient_time, update_time
                 batches.append(b)
-                self.arrival_count[b[0]] += self.b
                 self.queue.task_done()
 
             group_start = time.time()
@@ -73,7 +68,7 @@ class ParameterServer(object):
             grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches])
 
             self.apply_gradients(grad)
-            del batches, weights, w_ref, grad
+            del batches, weights, w_ref, grad#, tasks
             self.arrival_time.append([self.processed, group_start - self.start_time])
             self.gradient_time.append([self.processed, time.time() - group_start])
             self.update_time.append([self.processed, time.time() - self.start_time])
@@ -85,7 +80,7 @@ class ParameterServer(object):
     def apply_gradients(self, gradients):
         grad = np.mean(gradients, axis = 0)
         for i, param in enumerate(self.net.parameters()):
-            param.data -= self.lr * torch.Tensor(grad[i])
+            param.data -= self.l * torch.Tensor(grad[i])
 
         self.processed += self.k
         del grad
@@ -99,103 +94,55 @@ class ParameterServer(object):
         test_server.test_acc.remote(weights, self.processed)
         del weights
 
-    async def price_producer(self, l, allocation, adaptive=False):
-        self.p_spot, update_time = self.price_distr.get_price()
-        self.p_on_demand = self.price_distr.get_on_demand()
+    async def price_producer(self, l):
 
         N = len(self.workers)
-        #for adaptive method
-        self.availability = 1
-        self.spot_time = 1
-        self.on_time = np.ones(N)
+        prices = np.zeros(N)
+        state = np.ones(N)
 
-        if adaptive:
-            self.persistence = np.ones(N)
-        else:
-            self.persistence = allocation.allocate(l, self.p_spot, self.p_on_demand)
-        prices = self.persistence * self.p_spot
-        prices[prices == 0] = self.p_on_demand
-        self.spot_state = np.ones(N)
 
-        last_update = time.time()
-        print("starting spot price set to {}".format(self.p_spot))
-
-        refresh_interval = 2
-        next_interval = refresh_interval
-
-        total_cost = 0
+        if bid2:
+            if bid2 < bid1:
+                raise ValueError('bid2 cannot be lower than bid1')
+        n1 = len(self.workers) - n2
+        status1 = True
+        status2 = True
+        last_update = time.time() - self.start_time
+        self.price_log.append([last_update, self.price])
+        print("starting price set to {}".format(self.price))
 
         while self.running:
+            if bid2:
+                if bid2 < self.price and status2:
+                    for w in self.workers[-n2:]:
+                        w.preempt.remote()
+                    status2 = False
+                    print("n2 preempted due to pricing")
+                elif bid2 >= self.price and not status2:
+                    for w in self.workers[-n2:]:
+                        w.restart.remote()
+                    status2 = True
+                    print("n2 restarted due to pricing")
+            if bid1 < self.price and status1:
+                for w in self.workers[:n1]:
+                    w.preempt.remote()
+                status1 = False
+                print("n1 preempted due to pricing")
+            elif bid1 >= self.price and not status1:
+                for w in self.workers[:n1]:
+                    w.restart.remote()
+                status1 = True
+                print("n1 restarted due to pricing")
 
-            if update_time == False:
-                interval = refresh_interval
-
-                self.refresh_workers(allocation, adaptive)
-            else:
-                if update_time < next_interval:
-                    interval = update_time
-                    next_interval -= update_time
-                    self.p_spot, update_time = self.price_distr.get_price()
-                    print("spot price changed to {}".format(self.p_spot))
-
-                    if adaptive:
-                        self.adap_allocate(allocation)
-                    else:
-                        self.persistence = allocation.allocate(l, self.p_spot, self.p_on_demand)
-                    prices = self.persistence * self.p_spot
-                    prices[prices == 0] = self.p_on_demand
-                else:
-                    interval = next_interval
-                    next_interval = refresh_interval
-                    update_time -= interval
-
-                    self.refresh_workers(allocation, adaptive)
-
-
+            self.price, interval = self.price_distr.get_price()
+            if interval == False:
+                break
             await asyncio.sleep(interval)
+            last_update = time.time() - self.start_time
+            self.price_log.append([last_update, self.price])
+            print("price changed to {}".format(self.price))
 
-            real_interval = time.time() - last_update
-            last_update = time.time()
-            for i in range(N):
-                if not self.persistence[i]:
-                    total_cost += real_interval * self.p_on_demand
-                    self.on_time[i] += real_interval
-                elif self.spot_state[i]:
-                    total_cost += real_interval * self.p_spot
-                    self.availability += real_interval
-                    self.spot_time += real_interval
-                    self.on_time[i] += real_interval
-                else:
-                    self.spot_time += real_interval
-
-            self.cost_log.append([  last_update - self.start_time,
-                                    self.p_spot,
-                                    np.sum(self.persistence),
-                                    np.sum(np.logical_or((1 - self.persistence), self.spot_state)),
-                                    total_cost])
-
-        return 'price', np.array(self.cost_log)
-
-    def refresh_workers(self, allocation, adaptive):
-        switch = allocation.preempt(self.spot_state)
-        #if adaptive:
-            #self.adap_allocate(allocation)
-
-        self.spot_state = np.logical_xor(self.spot_state, switch).astype(float)
-        for i in range(len(self.workers)):
-            if self.spot_state[i] or not self.persistence[i]:
-                self.workers[i].restart.remote()
-            else:
-                self.workers[i].preempt.remote()
-        #print("running workers: {}".format(np.logical_or((1 - spot), state)))
-        #print("NS = {}, number running = {}".format(np.sum(self.persistence), np.sum(np.logical_or((1 - self.persistence), self.spot_state))))
-
-    def adap_allocate(self, allocation):
-        elapsed = time.time() - self.start_time
-        l_adap = self.arrival_count / self.on_time
-        l_adap[l_adap < 1] = 1
-        print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
-        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=self.availability/self.spot_time)
+        return 'price', np.array(self.price_log)
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -205,8 +152,7 @@ class ParameterServer(object):
 # test server
 ##################################################################
 
-#@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
-@ray.remote(num_cpus=4)             #CPU MODEL
+@ray.remote(num_cpus=4, num_gpus=1)
 class TestServer(object):
     def __init__(self, Net):
         self.processed = 0
@@ -214,27 +160,24 @@ class TestServer(object):
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(self.device)
         self.net = Net().to(self.device)
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
-        print("test server init on device {}".format(self.device))
+        print("test server init")
 
     def test_acc(self, weights, itr):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
     async def valid_consumer(self, get_testset, start_time, target_acc=None, autoexit=False):
-        testset = get_testset(self.device.type)
-        if isinstance(testset, list):
-            test_loader = [torch.utils.data.DataLoader(s, batch_size=128, shuffle=False) for s in testset]
-        else:
-            test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False)
+        testset = get_testset()
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False)
         accuracy = []
 
         while True:
             itr = await self.queue.get()
             self.queue.task_done()
             if itr == "stop":
-                break
+                return 'ts', np.array(accuracy)
             test_start = time.time()
 
             for i, param in enumerate(self.net.parameters()):
@@ -242,14 +185,13 @@ class TestServer(object):
             del self.weights[itr]
 
             self.processed = itr
-            acc, loss = self.get_acc(test_loader)
-            print("ACCURACY AFTER {} BATCHES: {}; LOSS: {}".format(self.processed, acc, loss))
-            accuracy.append([self.processed, acc, loss])
+            acc = self.get_acc(test_loader).item()
+            print("ACCURACY AFTER {} BATCHES: {}".format(self.processed, acc))
+            accuracy.append([self.processed, acc])
 
-            if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 20000, 200000):
+            if autoexit and self.target_itr > 0 and self.processed >= self.target_itr + 20000:
                 print("AUTOEXITING...")
                 self.terminate()
-                break
 
             if target_acc and len(accuracy) >= 10 and self.target_itr < 0:
                 last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
@@ -259,55 +201,17 @@ class TestServer(object):
 
             print("TEST TIME: {}".format(time.time() - test_start))
 
-        return 'ts', np.array(accuracy)
-
     def get_acc(self, test_loader):
         self.net.eval()
-        if self.device.type == 'cpu':
-            self.net.share_memory()
-            manager = mp.Manager()
-            results = manager.dict()
-            processes = []
-            for i, loader in enumerate(test_loader):
-                p = mp.Process(target=self.test_cpu, args=(loader, i, results))
-                processes.append(p)
-                p.start()
-            for p in processes:
-                p.join()
-            sum = 0
-            count = 0
-            loss = 0
-            for r in results:
-                sum += results[r][0]
-                count += results[r][1]
-                loss += results[r][2]
-            return sum / count, loss
-        else:
-            return self.test_gpu(test_loader)
-
-    def test_gpu(self, loader):
         top1 = data_tools.AverageMeter()
-        loss = 0
-        for batch_idx, (inputs, targets) in enumerate(loader):
+        # correct = 0
+        # total = 0
+        for batch_idx, (inputs, targets) in enumerate(test_loader):
+            # inputs, targets = inputs.cuda(non_blocking=True), targets.cuda(non_blocking=True)
             outputs = self.net(inputs.to(self.device))
-            l = self.criterion(outputs, targets.to(self.device))
             acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
             top1.update(acc1[0], inputs.size(0))
-            loss += l.item()
-            del outputs, l
-        return top1.avg.item(), loss
-
-    def test_cpu(self, loader, i, results):
-        top1 = data_tools.AverageMeter()
-        loss = 0
-        for batch_idx, (inputs, targets) in enumerate(loader):
-            outputs = self.net(inputs.to(self.device))
-            l = self.criterion(outputs, targets.to(self.device))
-            acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
-            top1.update(acc1[0], inputs.size(0))
-            loss += l.item()
-            del outputs, l
-        results[i] = (top1.sum.item(), top1.count, loss)
+        return top1.avg
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -333,19 +237,17 @@ class Worker(object):
         self.arrival_time = []
         self.gradient_time = []
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(self.device)
         self.net = Net().to(self.device)
         self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.accs = []
-        print("worker {} init with device {}".format(self.worker_index, self.device))
+        print("worker {} init".format(self.worker_index))
 
     async def batch_producer(self, get_trainset, t=0.001):
         trainset = get_trainset(self.worker_index)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True)
         iterator = iter(train_loader)
-
-        start_time = time.time()
-        #i = 0
 
         while self.running:
             # SIGNAL QUEUE
@@ -357,11 +259,8 @@ class Worker(object):
             self.signal(data, target)
 
             # SIMULATE DATA INTER-ARRIVAL TIME
-            wait_time = random.exponential(t - 0.00175) #ADJUSTED FOR OTHER DELAYS
+            wait_time = random.exponential(t)
             await asyncio.sleep(wait_time)
-            #i += 1
-            #if i == 20000 or (i % 200000) == 0:
-                #print("ARRIVAL RATE AT {} ARRIVALS: {}".format(i, (time.time() - start_time) / i))
 
     def signal(self, data, target):
         self.queue.put_nowait((data, target))
@@ -430,7 +329,7 @@ class Coordinator(object):
 
     def __init__(self, args, pricing):
         self.args = args
-        self.ps = ParameterServer.remote(self.Net, pricing, k=self.args.K, t=self.args.test, B=self.args.bs)
+        self.ps = ParameterServer.remote(self.Net, pricing, k=self.args.K, t=self.args.test)
         self.ts = TestServer.remote(self.Net)
         self.workers = []
         for i in range(self.args.size):

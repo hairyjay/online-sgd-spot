@@ -16,8 +16,7 @@ initial_workers: 65
 # target_utilization is 0.8, it would resize the cluster to 13. This fraction
 # can be decreased to increase the aggressiveness of upscaling.
 # This value must be less than 1.0 for scaling to happen.
-#target_utilization_fraction: 0.8
-upscaling_speed: 1.0
+target_utilization_fraction: 0.8
 
 # This executes all commands on all nodes in the docker container,
 # and opens all the necessary ports to support the Ray cluster.
@@ -54,49 +53,50 @@ auth:
 
 
 
+# Provider-specific config for the head node, e.g. instance type. By default
+# Ray will auto-configure unspecified fields such as SubnetId and KeyName.
+# For more documentation on available fields, see:
+# http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
+head_node:
+    InstanceType: m4.xlarge
+    ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
+    #KeyName: hhj
 
-available_node_types:
-    cpu_ps:
-        node_config:
-            InstanceType: m4.xlarge
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
-            #KeyName: hhj
+    # Set primary volume to 120 GiB
+    BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+              VolumeSize: 140
 
-            # Set primary volume to 120 GiB
-            BlockDeviceMappings:
-                - DeviceName: /dev/sda1
-                  Ebs:
-                      VolumeSize: 140
+# Provider-specific config for worker nodes, e.g. instance type. By default
+# Ray will auto-configure unspecified fields such as SubnetId and KeyName.
+# For more documentation on available fields, see:
+# http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
+worker_nodes:
+    InstanceType: c5.xlarge
+    ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
+    #KeyName: hhj
 
-    gpu_ts:
-        node_config:
-            InstanceType: g4dn.xlarge
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
-            #KeyName: hhj
+    # Set primary volume to 25 GiB
+    BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+              VolumeSize: 140
 
-            # Set primary volume to 120 GiB
-            BlockDeviceMappings:
-                - DeviceName: /dev/sda1
-                  Ebs:
-                      VolumeSize: 140
-        #min_workers: 1
-        max_workers: 1
+    # Run workers on spot by default. Comment this out to use on-demand.
+    #InstanceMarketOptions:
+        #MarketType: spot
+    # SpotOptions:
+    #     MaxPrice: 1
+        # Additional options can be found in the boto docs, e.g.
+        #   SpotOptions:
+        #       MaxPrice: MAX_HOURLY_PRICE
 
-    cpu_w:
-        node_config:
-            InstanceType: c5.large
-            ImageId: ami-0ecd5ccac6e9340e6 # Amazon Deep Learning AMI (Ubuntu) Version 42.1
-            #KeyName: hhj
+    # Additional options in the boto docs.
 
-            # Set primary volume to 25 GiB
-            BlockDeviceMappings:
-                - DeviceName: /dev/sda1
-                  Ebs:
-                      VolumeSize: 140
-        #min_workers: 64
-        max_workers: 64
 
-head_node_type: cpu_ps
+
+
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
@@ -105,6 +105,10 @@ file_mounts: {
    "~/main": "./main",
    "~/price-trace": "./price-trace",
    "~/spot_aws/data": "./datasets",
+   # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/",
+   #"~/spot_aws/": "/Users/jianyuw1/Downloads/ML-on-the-Cheap-master/spot_aws/",
+   # "~/spot/": "/Users/jingjing/Desktop/cmu/18fall-research/ML-on-the-Cheap/DistSGDonRay/examples/parameter_server/sync_parameter_server.py",
+#    "/path2/on/remote/machine": "/path2/on/local/machine",
 }
 
 # List of shell commands to run to set up nodes.

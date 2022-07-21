@@ -4,66 +4,15 @@ import asyncio
 import time
 import os
 
-class Uniform_Pricing(object):
-    def __init__(self, min_p, max_p, update_mean, update_var=None):
-        self.min_p = min_p
-        self.max_p = max_p
-        self.update_mean = update_mean
-        self.update_var = update_var
-
-    def start_price(self):
-        return random.uniform(self.min_p, self.max_p)
-
-    def get_price(self):
-        interval = self.update_mean
-        if self.update_var:
-            interval = random.normal(self.update_mean, self.update_var)
-            while interval <= 0:
-                interval = random.normal(self.update_mean, self.update_var)
-
-        return random.uniform(self.min_p, self.max_p), interval
-
-    def get_stats(self):
-        return {"distribution": "uniform",
-                "price_min": self.min_p,
-                "price_max": self.max_p,
-                "update_time_mean": self.update_mean,
-                "update_time_var": self.update_var if self.update_var else 0}
-
-class Gaussian_Pricing(object):
-    def __init__(self, p_mean, p_var, update_mean, update_var=None):
-        self.p_mean = p_mean
-        self.p_var = p_var
-        self.update_mean = update_mean
-        self.update_var = update_var
-
-    def start_price(self):
-        return random.normal(self.p_mean, self.p_var)
-
-    def get_price(self):
-        interval = self.update_mean
-        if self.update_var:
-            interval = random.normal(self.update_mean, self.update_var)
-            while interval <= 0:
-                interval = random.normal(self.update_mean, self.update_var)
-
-        return random.normal(self.p_mean, self.p_var), interval
-
-    def get_stats(self):
-        return {"distribution": "gaussian",
-                "price_mean": self.p_mean,
-                "price_var": self.p_var,
-                "update_time_mean": self.update_mean,
-                "update_time_var": self.update_var if self.update_var else 0}
-
-class Trace_Pricing(object):
-    def __init__(self, filename, scale=1):
+class TracePricing(object):
+    def __init__(self, filename, on_demand, scale=1):
         with open(os.path.join("price-trace", filename), 'rb') as f:
             self.trace = np.load(f)
             self.trace[1, :] /= scale
+        self.on_demand = on_demand
         self.filename = filename
         self.scale = scale
-        self.i = 0
+        self.i = -1
 
     def start_price(self):
         return self.trace[0, 0]
@@ -74,12 +23,16 @@ class Trace_Pricing(object):
             self.i = 0
         return self.trace[0, self.i], self.trace[1, self.i]
 
+    def get_on_demand(self):
+        return self.on_demand
+
     def get_stats(self):
         return {"distribution": "trace",
                 "filename": self.filename,
-                "scale": self.scale}
+                "scale": self.scale,
+                "on_demand": self.on_demand}
 
-class Fixed_Pricing(object):
+class FixedPricing(object):
     def __init__(self, p):
         self.p = p
 
@@ -89,29 +42,80 @@ class Fixed_Pricing(object):
     def get_price(self):
         return self.p, False
 
+    def get_on_demand(self):
+        return self.p
+
     def get_stats(self):
         return {"distribution": "fixed",
                 "price": self.p}
 
-class Binomial_Preemption(object):
-    def __init__(self, q):
-        self.q = q
+class InstanceAllocation(object):
+    def __init__(self, args, cycles=500):
+        self.J = args.J
+        self.b = args.bs
+        self.N = args.size
+        self.t = args.d
+        self.a = args.a
+        self.cycles = cycles
+        self.q_turn_off = 1 / (self.a * cycles)
+        self.q_turn_on = 1 / ((1 - self.a) * cycles)
 
-    def choose(self, items):
-        choice = random.binomial(size=len(items), n=1, p=self.q)
-        return [i for i, c in zip(items, choice) if c]
+    def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
+        spot = np.zeros(self.N)
+        t = max(self.t - elapsed, 1.0)
+        J = max(self.J - arrived, 1)
+        if a == None:
+            a = self.a
 
-    def get_info(self):
-        return {"distribution": "binomial",
-                "q": self.q}
+        if p_spot >= p_on_demand or not p_on_demand:
+            pass
 
-class Uniform_Preemption(object):
-    def __init__(self):
-        return
+        elif np.isscalar(l):
+            #FIXED RATE
+            NS = np.floor((self.N - (J * self.b) / (l * t)) / (1 - a)).astype(int)
+            NS = min(NS, self.N)
+            spot[:NS] = 1
 
-    def choose(self, items):
-        n = random.randint(low=1, high=len(items))
-        return random.choice(items, n, replace=False)
+        elif isinstance(l, np.ndarray):
+            #VARIABLE RATE
+            l_arg = np.argsort(l)
+            threshold = (np.sum(l) - (J * self.b / t)) / (1 - a)
+            cost = np.inf
+            rate_sum = 0
+            spot_indices = []
+            for ns, idx in enumerate(l_arg):
+                new_cost = self.compute_cost(l, ns, rate_sum, p_spot, p_on_demand, J, a)
+                rate_sum += l[idx]
+                #if new_cost > cost:
+                    #print("local min found")
+                #if rate_sum > threshold:
+                    #print("threshold {} reached".format(threshold))
+                if new_cost > cost or rate_sum >= threshold:
+                    break
+                else:
+                    spot_indices.append(idx)
+                    cost = new_cost
 
-    def get_info(self):
-        return {"distribution": "uniform"}
+            spot = np.zeros(self.N)
+            spot[spot_indices] = 1
+
+        else:
+            raise TypeError
+
+        return spot
+
+    def compute_cost(self, l, ns, rate_sum, p_spot, p_on_demand, J, a):
+        return J * self.b * (self.N * p_spot + (a * p_spot - p_on_demand) * ns) / (np.sum(l) - (1 - a) * rate_sum)
+
+    def preempt(self, state):
+        probs = state * self.q_turn_off
+        probs[probs == 0] = self.q_turn_on
+        return random.binomial(1, probs)
+
+    def get_stats(self):
+        return {"expected_interations": self.J,
+                "deadline": self.t,
+                "availability": self.a,
+                "cycles": self.cycles,
+                "p_preempt": self.q_turn_off,
+                "p_restart": self.q_turn_on}

@@ -14,16 +14,8 @@ class Shards(actors.Coordinator):
     def trainset(self):
         pass
 
-    def get_testset(self, type='cuda'):
-        print(type)
-        if type == 'cpu':
-            THREADS = 4
-            partition_sizes = [1.0 / THREADS for _ in range(THREADS)]
-            partition = DataPartitioner(self.testset(), partition_sizes, isNonIID=False)
-            partitions = [partition.use(i) for i in range(THREADS)]
-            return partitions
-        else:
-            return self.testset()
+    def get_testset(self):
+        return self.testset()
 
     def get_trainset(self, idx):
         partition_sizes = [1.0 / self.args.size for _ in range(self.args.size)]
@@ -31,14 +23,14 @@ class Shards(actors.Coordinator):
         partition = partition.use(idx)
         return partition
 
-    def run(self, start_time, allocation, rate_dist=None, adaptive=False):
+    def run(self, start_time, bids, rate_dist=None):
         t = [self.args.t] * self.args.size
         l = 1 / self.args.t
         if rate_dist is not None:
             t, l = rate_dist.get_t(self.args.size)
 
         self.processes.append(self.ps.queue_consumer.remote(self.workers, self.ts, start_time))
-        self.processes.append(self.ps.price_producer.remote(l, allocation, self.args.adap))
+        self.processes.append(self.ps.price_producer.remote(**bids))
         self.processes.append(self.ts.valid_consumer.remote(self.get_testset, start_time, target_acc=self.args.target, autoexit=self.args.autoexit))
 
         for i, w in enumerate(self.workers):
