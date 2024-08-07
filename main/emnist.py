@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
 
-import shards
+from . import shards
 
 class EMNISTShards(shards.Shards):
     class Net(nn.Module):

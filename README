@@ -1,0 +1,54 @@
+# Distributed OnLine Learning
+
+This is documentation for the paper **DOLL: Distributed OnLine Learning Using Preemptible Cloud Instances**. The paper currently has two versions:
+
+1. *DOLL: Distributed OnLine Learning Using Preemptible Cloud Instances*, MAMA Workshop at SIGMETRICS 2022. [[ACM](https://dl.acm.org/doi/abs/10.1145/3561074.3561082)] [[PDF](https://www.sigmetrics.org/mama/2022/abstracts/Jiang.pdf)]
+2. *DOLL: Distributed OnLine Learning Using Preemptible Cloud Instances*, WiOpt 2023. [[IEEE](https://ieeexplore.ieee.org/abstract/document/10349831)] [[Technical Report](https://research.ece.cmu.edu/lions/Papers/DOLL.pdf)]
+
+## Environment (2024-07-31)
+The multi-machine parallelism used in the experiments is achieved using the Ray package in Python. Tasks in environments are distributed across multiple VMs on AWS EC2 clusters.
+
+For experiments in [1, 2], the environment is on clusters directly launched by Ray on AWS. This can only be run on on-demand clusters and may be more expensive. The Ray cluster launcher can be used by following [this guide](https://docs.ray.io/en/latest/cluster/vms/user-guides/launching-clusters/aws.html). The YAML files for the cluster can be found in the root directory of the repository.
+
+For the paper data in [3], the experiment environment for DOLL is hosted on Kubernetes clusters through [KubeRay](https://docs.ray.io/en/latest/cluster/kubernetes/index.html). For cost saving purposes, experiments are run on Amazon EKS clusters with spot instances for workers. The workers for the cluster can be set up through [this guide](https://docs.ray.io/en/latest/cluster/kubernetes/user-guides/aws-eks-gpu-cluster.html#kuberay-eks-gpu-cluster-setup).
+
+0. For the Kubernetes setting, nodes must be set up and managed separately. [Helm](https://helm.sh/) must be installed to install packages on the cluster.
+
+1. Connect to the EKS clusters (Step 2), i.e.
+    ```
+    aws eks update-kubeconfig --region us-east-1 --name doll
+    ```
+
+2. Install a KubeRay operator:
+    ```
+    helm install kuberay-operator kuberay/kuberay-operator --version 1.0.0
+    ```
+
+3. Launch a Ray cluster with custom resource configuration:
+    ```
+    kubectl apply -f k8s-ray-cluster-test.yaml
+    ```
+
+4. Start port forwarding to the Ray Dashboard in a separate shell tab:
+    ```
+    kubectl port-forward services/raycluster-head-svc 8265:8265
+    ```
+
+5. Get the name of the head pod:
+    ```
+    kubectl get pods
+    # NAME                               READY   STATUS    RESTARTS   AGE
+    # kuberay-operator-7f85d8578-kzmg6   1/1     Running   0          56m
+    # raycluster-head-v2mlm              1/1     Running   0          26m
+    # raycluster-worker-doll-w-2zd2z     1/1     Running   0          26m
+    # raycluster-worker-doll-w-f9jlw     1/1     Running   0          26m
+    ```
+
+6. Copy code files to head pod:
+    ```
+    kubectl cp ./main $HEAD-POD-NAME:/home/ray
+    kubectl cp ./price-trace $HEAD-POD-NAME:/home/ray
+    ```
+    
+
+

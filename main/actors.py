@@ -8,14 +8,14 @@ import torch
 import torch.optim as optim
 import torch.multiprocessing as mp
 
-import data_tools
-import price
+from . import data_tools
+from . import price
 
 ##################################################################
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=2)
+@ray.remote(num_cpus=1)
 class ParameterServer(object):
     def __init__(self, Net, price_distr, lr=0.005, k=5, t=100, B=256):
         self.params = 0
@@ -206,7 +206,7 @@ class ParameterServer(object):
 ##################################################################
 
 #@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
-@ray.remote(num_cpus=4)             #CPU MODEL
+@ray.remote(num_cpus=1)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net):
         self.processed = 0
@@ -317,7 +317,7 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=2)
+@ray.remote(num_cpus=1)
 class Worker(object):
     def __init__(self, worker_index, ps, Net, B=32, lr=0.03):
         self.worker_index = worker_index

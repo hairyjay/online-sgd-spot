@@ -1,5 +1,4 @@
 import numpy as np
-
 import torch
 
 def comp_accuracy(output, target, topk=(1,)):

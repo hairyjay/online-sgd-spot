@@ -7,10 +7,10 @@ from datetime import datetime
 import os
 import json
 
-import price
-import rates
-import cifar
-import emnist
+from . import price
+from . import rates
+from . import cifar
+from . import emnist
 
 ##################################################################
 # Start ray cluster
