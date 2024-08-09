@@ -34,7 +34,7 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     kubectl port-forward services/raycluster-head-svc 8265:8265
     ```
 
-5. Get the name of the head pod:
+5. Get the name of the head pod and also make sure all pods are running:
     ```
     kubectl get pods
     # NAME                               READY   STATUS    RESTARTS   AGE

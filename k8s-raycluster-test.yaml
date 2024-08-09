@@ -8,7 +8,7 @@ metadata:
   name: raycluster
 spec:
   # The version of Ray you are using. Make sure all Ray containers are running this version of Ray.
-  rayVersion: '2.3.0'
+  rayVersion: '2.34.0'
   ######################headGroupSpec#################################
   # head group template and specs, (perhaps 'group' is not needed in the name)
   headGroupSpec:
@@ -24,8 +24,11 @@ spec:
         containers:
         # The Ray head pod
         - name: ray-head
-          image: rayproject/ray:2.3.0
+          image: rayproject/ray:2.34.0
           lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","pip install torch torchvision"]
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -34,7 +37,7 @@ spec:
               cpu: "4"
               memory: "24Gi"
             requests:
-              cpu: "1"
+              cpu: "1500m"
               memory: "2G"
 
   workerGroupSpecs:
@@ -56,8 +59,11 @@ spec:
       spec:
         containers:
         - name: ml # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
-          image: rayproject/ray:2.3.0
+          image: rayproject/ray:2.34.0
           lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","pip install torch torchvision"]
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -67,6 +73,6 @@ spec:
               memory: "24Gi"
               #nvidia.com/gpu: 1
             requests:
-              cpu: "1"
+              cpu: "1500m"
               memory: "1G"
               #nvidia.com/gpu: 1

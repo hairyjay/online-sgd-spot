@@ -15,7 +15,7 @@ from . import price
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=2)
 class ParameterServer(object):
     def __init__(self, Net, price_distr, lr=0.005, k=5, t=100, B=256):
         self.params = 0
@@ -83,10 +83,16 @@ class ParameterServer(object):
                 self.queue_acc(test_server)
 
     def apply_gradients(self, gradients):
-        grad = np.mean(gradients, axis = 0)
+        #print(type(gradients), [type(g) for g in gradients])
+        #for g in gradients:
+            #print(len(g), [(type(i), np.size(i)) for i in g])
+        #grad = []
+        #for i in range(len(gradients[0])):
+            #grad.append(np.mean([g[i] for g in gradients]))
+        #grad = np.mean(gradients, axis = 0)
         for i, param in enumerate(self.net.parameters()):
-            param.data -= self.lr * torch.Tensor(grad[i])
-
+            grad = np.mean([g[i] for g in gradients], axis = 0)
+            param.data -= self.lr * torch.from_numpy(grad)
         self.processed += self.k
         del grad
         #print(self.processed)
@@ -194,8 +200,9 @@ class ParameterServer(object):
         elapsed = time.time() - self.start_time
         l_adap = self.arrival_count / self.on_time
         l_adap[l_adap < 1] = 1
-        print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
-        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=self.availability/self.spot_time)
+        #print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
+        a = self.availability/float(self.spot_time)
+        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=a)
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -206,7 +213,7 @@ class ParameterServer(object):
 ##################################################################
 
 #@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
-@ray.remote(num_cpus=1)             #CPU MODEL
+@ray.remote(num_cpus=2)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net):
         self.processed = 0
@@ -317,7 +324,7 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=2)
 class Worker(object):
     def __init__(self, worker_index, ps, Net, B=32, lr=0.03):
         self.worker_index = worker_index
@@ -435,6 +442,7 @@ class Coordinator(object):
         self.workers = []
         for i in range(self.args.size):
             self.workers.append(Worker.remote(i, self.ps, self.Net, B=self.args.bs, lr=self.args.lr))
+        print(self.workers)
         self.processes = []
 
     def run(self):

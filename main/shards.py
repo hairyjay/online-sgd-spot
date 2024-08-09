@@ -17,7 +17,7 @@ class Shards(actors.Coordinator):
     def get_testset(self, type='cuda'):
         print(type)
         if type == 'cpu':
-            THREADS = 4
+            THREADS = 1
             partition_sizes = [1.0 / THREADS for _ in range(THREADS)]
             partition = DataPartitioner(self.testset(), partition_sizes, isNonIID=False)
             partitions = [partition.use(i) for i in range(THREADS)]

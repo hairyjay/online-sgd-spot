@@ -72,14 +72,14 @@ class InstanceAllocation(object):
 
         elif np.isscalar(l):
             #FIXED RATE
-            NS = np.floor((self.N - (J * self.b) / (l * t)) / (1 - a)).astype(int)
+            NS = np.floor((self.N - (J * self.b) / (l * float(t))) / max(1 - a, 1e-6)).astype(int)
             NS = min(NS, self.N)
             spot[:NS] = 1
 
         elif isinstance(l, np.ndarray):
             #VARIABLE RATE
             l_arg = np.argsort(l)
-            threshold = (np.sum(l) - (J * self.b / t)) / (1 - a)
+            threshold = (np.sum(l) - (J * self.b / float(t))) / max(1 - a, 1e-6)
             cost = np.inf
             rate_sum = 0
             spot_indices = []
