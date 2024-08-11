@@ -30,7 +30,10 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c","pip install torch torchvision"]
+                command:
+                  - ["/bin/sh","-c","pip install torch torchvision"]
+                  - ["/bin/sh","-c","sudo apt-get update"]
+                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -68,11 +71,20 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c","pip install torch torchvision"]
+                command:
+                  - ["/bin/sh","-c","pip install torch torchvision"]
+                  - ["/bin/sh","-c","sudo apt-get update"]
+                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
+                  - ["/bin/sh","-c","sudo apt-get install curl"]
+                  - ["/bin/sh","-c","git clone https://github.com/hairyjay/infimnist_py.git"]
+                  - ["/bin/sh","-c","curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz"]
+                  - ["/bin/sh","-c","tar -xvzf infimnist.tar.gz"]
+                  - ["/bin/sh","-c","cp -r infimnist/data/ infimnist_py/"]
+                  - ["/bin/sh","-c","pip install infimnist_py/"]
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
-          resources:
+          resources:ls
             limits:
               cpu: "2"
               memory: "24G"
@@ -103,7 +115,10 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c","pip install torch torchvision"]
+                command:
+                  - ["/bin/sh","-c","pip install torch torchvision"]
+                  - ["/bin/sh","-c","sudo apt-get update"]
+                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]

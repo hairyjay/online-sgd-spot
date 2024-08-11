@@ -49,5 +49,8 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     bash copy-all.sh
     ```
     
-
+7. SSH into the head node:
+    ```
+    kubectl exec --stdin --tty raycluster-head-fq7st -- /bin/bash
+    ```
 
