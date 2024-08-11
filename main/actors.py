@@ -8,16 +8,16 @@ import torch
 import torch.optim as optim
 import torch.multiprocessing as mp
 
-from . import data_tools
-from . import price
+import data_tools
+import price
 
 ##################################################################
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=4)
+@ray.remote(num_cpus=2)
 class ParameterServer(object):
-    def __init__(self, Net, ts, price_distr, size, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, Net, price_distr, lr=0.005, k=5, t=100, B=256):
         self.params = 0
         self.lr = lr
         self.k = k
@@ -25,12 +25,8 @@ class ParameterServer(object):
         self.b = B
         self.queue = asyncio.Queue()
         self.processed = 0
-        self.ts = ts
         self.workers = None
         self.start_time = None
-        self.training = False
-        self.size = size
-        self.ready_workers = [False]*size
 
         self.arrival_time = []
         self.gradient_time = []
@@ -44,31 +40,18 @@ class ParameterServer(object):
         self.net = Net()
         print("param server init")
 
-    def ready_signal(self, worker_index):
-        self.ready_workers[worker_index] = True
-        if all(self.ready_workers):
-            self.training = True
-            print("CALIBRATION COMPLETE: READY TO TRAIN")
-            self.ts.ready_signal.remote()
-            for w in self.workers:
-                w.ready_signal.remote()
-        return True
-
     def signal(self, worker_index, itr):
         #print("got signal from worker {} batch {}".format(worker_index, itr))
         self.queue.put_nowait((worker_index, itr))
+        #print(itr)
         return True
 
     async def queue_consumer(self, workers, test_server, start_time):
-        self.workers = workers
+        if self.workers is None:
+            self.workers = workers
         self.start_time = start_time
         self.arrival_count = np.zeros(len(self.workers))
-
-        # CLEAR QUEUE AFTER CALIBRATION
-        while not self.training:
-            await asyncio.sleep(0)
-        del self.queue
-        self.queue = asyncio.Queue()
+        #print("QUEUE START")
 
         while True:
             batches = []
@@ -82,6 +65,7 @@ class ParameterServer(object):
                 batches.append(b)
                 self.arrival_count[b[0]] += self.b
                 self.queue.task_done()
+            #print("GROUP COMPLETE")
 
             group_start = time.time()
 
@@ -103,16 +87,10 @@ class ParameterServer(object):
                 self.queue_acc(test_server)
 
     def apply_gradients(self, gradients):
-        #print(type(gradients), [type(g) for g in gradients])
-        #for g in gradients:
-            #print(len(g), [(type(i), np.size(i)) for i in g])
-        #grad = []
-        #for i in range(len(gradients[0])):
-            #grad.append(np.mean([g[i] for g in gradients]))
-        #grad = np.mean(gradients, axis = 0)
+        grad = np.mean(gradients, axis = 0)
         for i, param in enumerate(self.net.parameters()):
-            grad = np.mean([g[i] for g in gradients], axis = 0)
-            param.data -= self.lr * torch.from_numpy(grad)
+            param.data -= self.lr * torch.Tensor(grad[i])
+
         self.processed += self.k
         del grad
         #print(self.processed)
@@ -125,14 +103,14 @@ class ParameterServer(object):
         test_server.test_acc.remote(weights, self.processed)
         del weights
 
-    async def price_producer(self, l, allocation, adaptive=False):
+    async def price_producer(self, workers, l, allocation, adaptive=False):
+        if self.workers is None:
+            self.workers = workers
+        N = len(self.workers)
+
         self.p_spot, update_time = self.price_distr.get_price()
         self.p_on_demand = self.price_distr.get_on_demand()
 
-        while not self.training:
-            await asyncio.sleep(0)
-        print("START ParameterServer.price_producer(): {}".format(self.workers))
-        N = len(self.workers)
         #for adaptive method
         self.availability = 1
         self.spot_time = 1
@@ -217,15 +195,14 @@ class ParameterServer(object):
             else:
                 self.workers[i].preempt.remote()
         #print("running workers: {}".format(np.logical_or((1 - spot), state)))
-        #print("NS = {}, number running = {}".format(np.sum(self.persistence), np.sum(np.logical_or((1 - self.persistence), self.spot_state))))
+        print("NS = {}, number running = {}".format(np.sum(self.persistence), np.sum(np.logical_or((1 - self.persistence), self.spot_state))))
 
     def adap_allocate(self, allocation):
         elapsed = time.time() - self.start_time
         l_adap = self.arrival_count / self.on_time
         l_adap[l_adap < 1] = 1
-        #print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
-        a = self.availability/float(self.spot_time)
-        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=a)
+        print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
+        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=self.availability/self.spot_time)
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -244,28 +221,26 @@ class TestServer(object):
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.is_testset_list = False
         self.net = Net().to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
-        self.training = False
         print("test server init on device {}".format(self.device))
-
-    def ready_signal(self):
-        self.training = True
-        return True
 
     def test_acc(self, weights, itr):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, start_time, target_acc=None, autoexit=False):
-        while not self.training:
-            await asyncio.sleep(0)
-
+    async def valid_consumer(self, get_testset, start_time, expected_itr=200000, target_acc=None, autoexit=False):
         testset = get_testset(self.device.type)
-        if isinstance(testset, list):
-            test_loader = [torch.utils.data.DataLoader(s, batch_size=128, shuffle=False) for s in testset]
+        if self.device.type == 'cpu':
+            batch_size = 128
         else:
-            test_loader = torch.utils.data.DataLoader(testset, batch_size=128, shuffle=False)
+            batch_size = 1024
+        self.is_testset_list = isinstance(testset, list)
+        if self.is_testset_list:
+            test_loader = [torch.utils.data.DataLoader(s, batch_size=batch_size, shuffle=False) for s in testset]
+        else:
+            test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
         accuracy = []
 
         while True:
@@ -284,7 +259,7 @@ class TestServer(object):
             print("ACCURACY AFTER {} BATCHES: {}; LOSS: {}".format(self.processed, acc, loss))
             accuracy.append([self.processed, acc, loss])
 
-            if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 20000, 200000):
+            if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):
                 print("AUTOEXITING...")
                 self.terminate()
                 break
@@ -301,7 +276,7 @@ class TestServer(object):
 
     def get_acc(self, test_loader):
         self.net.eval()
-        if self.device.type == 'cpu':
+        if self.device.type == 'cpu' and self.is_testset_list:
             self.net.share_memory()
             manager = mp.Manager()
             results = manager.dict()
@@ -357,7 +332,7 @@ class TestServer(object):
 
 @ray.remote(num_cpus=2)
 class Worker(object):
-    def __init__(self, worker_index, ps, Net, B=32, lr=0.03):
+    def __init__(self, worker_index, ps, Net, B=32, lr=0.03, opt='sgd'):
         self.worker_index = worker_index
         self.ps = ps
         self.curritr = 0
@@ -365,8 +340,6 @@ class Worker(object):
         self.B = B
         self.lr = lr
         self.queue = asyncio.Queue()
-        self.training = False
-        self.batch_eps = 0
 
         self.running = True
         self.preempt = False
@@ -374,58 +347,41 @@ class Worker(object):
         self.gradient_time = []
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net = Net().to(self.device)
-        self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
+        if opt == 'adam':
+            self.optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08)
+        else:
+            self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.accs = []
         print("worker {} init with device {}".format(self.worker_index, self.device))
 
-    def ready_signal(self):
-        self.training = True
-        return True
-
-    def signal(self, data, target):
-        self.queue.put_nowait((data, target))
-        return True
-
     async def batch_producer(self, get_trainset, t=0.001):
         trainset = get_trainset(self.worker_index)
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True)
-        iterator = iter(train_loader)
-
-        # CALIBRATING FOR TIME DELAYS
-        calib_rounds = 1000
-        delay_calib = 0
-        for i in range(calib_rounds):
-            delay_start = time.time()
-            try:
-                data, target = next(iterator)
-            except StopIteration:
-                iterator = iter(train_loader)
-                data, target = next(iterator)
-            self.signal(data, target)
-            wait_time = random.exponential(t)
-            delay_end = time.time()
-            await asyncio.sleep(0)
-            delay_calib += delay_end - delay_start
-        self.batch_eps = delay_calib / calib_rounds
-        print("DELAY EPS: {}".format(self.batch_eps))
-        self.ps.ready_signal.remote(self.worker_index)
-
-        while not self.training:
-            await asyncio.sleep(0)
+        if hasattr(trainset, "is_infinite"):
+            infinite_set = True
+            i = 0
+        else:
+            infinite_set = False
+            train_loader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True)
+            iterator = iter(train_loader)
 
         start_time = time.time()
-        print("WORKER {}: TRAINING READY AT TIME {}".format(self.worker_index, start_time))
         #i = 0
 
         while self.running:
             # SIGNAL QUEUE
-            try:
-                data, target = next(iterator)
-            except StopIteration:
-                iterator = iter(train_loader)
-                data, target = next(iterator)
+            if infinite_set:
+                data, target = trainset[i]
+                i += 1
+            else:
+                try:
+                    data, target = next(iterator)
+                except StopIteration:
+                    iterator = iter(train_loader)
+                    data, target = next(iterator)
             self.signal(data, target)
+            if infinite_set:
+                del data, target
 
             # SIMULATE DATA INTER-ARRIVAL TIME
             wait_time = random.exponential(t - 0.00175) #ADJUSTED FOR OTHER DELAYS
@@ -433,6 +389,10 @@ class Worker(object):
             #i += 1
             #if i == 20000 or (i % 200000) == 0:
                 #print("ARRIVAL RATE AT {} ARRIVALS: {}".format(i, (time.time() - start_time) / i))
+
+    def signal(self, data, target):
+        self.queue.put_nowait((data, target))
+        return True
 
     async def batch_consumer(self, start_time):
         while True:
@@ -446,10 +406,13 @@ class Worker(object):
                 data.append(d)
                 target.append(t)
                 self.queue.task_done()
+            #print(self.curritr, self.preempt)
 
             if not self.preempt:
+                #print(data[0].size(), target[0])
                 data = torch.cat(data, 0)
                 target = torch.cat(target, 0)
+                #print(data.shape, target.shape)
                 self.batches[self.curritr] = (data, target)
                 self.arrival_time.append([self.curritr, time.time() - start_time])
 
@@ -497,21 +460,11 @@ class Coordinator(object):
 
     def __init__(self, args, pricing):
         self.args = args
+        self.ps = ParameterServer.remote(self.Net, pricing, k=self.args.K, t=self.args.test, B=self.args.bs)
         self.ts = TestServer.remote(self.Net)
-        self.ps = ParameterServer.remote(self.Net,
-                                         self.ts,
-                                         pricing,
-                                         self.args.size,
-                                         k=self.args.K,
-                                         t=self.args.test,
-                                         B=self.args.bs)
         self.workers = []
         for i in range(self.args.size):
-            self.workers.append(Worker.remote(i,
-                                              self.ps,
-                                              self.Net,
-                                              B=self.args.bs,
-                                              lr=self.args.lr))
+            self.workers.append(Worker.remote(i, self.ps, self.Net, B=self.args.bs, lr=self.args.lr, opt=self.args.optimizer))
         self.processes = []
 
     def run(self):
