@@ -7,15 +7,17 @@ from datetime import datetime
 import os
 import json
 
-from . import price
-from . import rates
-from . import cifar
-from . import emnist
+import price
+import rates
+import cifar
+import emnist
+import imnist
 
 ##################################################################
 # Start ray cluster
 ##################################################################
 
+RAY_IGNORE_UNHANDLED_ERRORS=1
 ray.init(address="auto")
 
 parser = argparse.ArgumentParser(description='PyTorch K-sync SGD')
@@ -35,6 +37,8 @@ parser.add_argument('--save', '-s', default=True, action='store_true', help='whe
 parser.add_argument('--fixed', '-f', action='store_true', help='fixed or uniform pricing')
 parser.add_argument('--adap', '-d', action='store_true', help='adaptive method')
 parser.add_argument('--autoexit', '-e', action='store_true', help='whether to exit on its own')
+parser.add_argument('--optimizer', default='sgd', help='optimizer')
+parser.add_argument('--dataset', default='emnist', help='experiment dataset')
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -45,8 +49,8 @@ if __name__ == "__main__":
     stats = vars(args)
 
     # PRICING
-    #pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
-    pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
+    pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
+    #pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
     #pricing = price.FixedPricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
@@ -63,8 +67,12 @@ if __name__ == "__main__":
     print(stats)
 
     # INITIALIZE WORKERS AND PARAMETER SERVER
-    #experiment = cifar.CIFARShards(args, pricing)
-    experiment = emnist.EMNISTShards(args, pricing)
+    if args.dataset == "cifar":
+        experiment = cifar.CIFARShards(args, pricing)
+    elif args.dataset == "imnist":
+        experiment = imnist.InfiMNISTShards(args, pricing)
+    else:
+        experiment = emnist.EMNISTShards(args, pricing)
     print("servers launched")
 
     start_time = time.time()

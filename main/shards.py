@@ -2,7 +2,7 @@ import numpy as np
 import numpy.random as random
 import ray
 
-from . import actors
+import actors
 
 class Shards(actors.Coordinator):
     def __init__(self, args, pricing):
@@ -11,25 +11,30 @@ class Shards(actors.Coordinator):
     def testset(self):
         pass
 
-    def trainset(self):
+    def trainset(self, idx=None):
         pass
 
     def get_testset(self, type='cuda'):
-        print(type)
+        #print(type)
+        set = self.testset()
         if type == 'cpu':
-            THREADS = 1
+            THREADS = 4
             partition_sizes = [1.0 / THREADS for _ in range(THREADS)]
-            partition = DataPartitioner(self.testset(), partition_sizes, isNonIID=False)
+            partition = DataPartitioner(set, partition_sizes, isNonIID=False)
             partitions = [partition.use(i) for i in range(THREADS)]
             return partitions
         else:
-            return self.testset()
+            return set
 
     def get_trainset(self, idx):
-        partition_sizes = [1.0 / self.args.size for _ in range(self.args.size)]
-        partition = DataPartitioner(self.trainset(), partition_sizes, isNonIID=False)
-        partition = partition.use(idx)
-        return partition
+        dataset, is_shard = self.trainset(idx)
+        if is_shard:
+            return dataset
+        else:
+            partition_sizes = [1.0 / self.args.size for _ in range(self.args.size)]
+            partition = DataPartitioner(dataset, partition_sizes, isNonIID=False)
+            partition = partition.use(idx)
+            return partition
 
     def run(self, start_time, allocation, rate_dist=None, adaptive=False):
         t = [self.args.t] * self.args.size
@@ -38,8 +43,12 @@ class Shards(actors.Coordinator):
             t, l = rate_dist.get_t(self.args.size)
 
         self.processes.append(self.ps.queue_consumer.remote(self.workers, self.ts, start_time))
-        self.processes.append(self.ps.price_producer.remote(l, allocation, self.args.adap))
-        self.processes.append(self.ts.valid_consumer.remote(self.get_testset, start_time, target_acc=self.args.target, autoexit=self.args.autoexit))
+        self.processes.append(self.ps.price_producer.remote(self.workers, l, allocation, self.args.adap))
+        self.processes.append(self.ts.valid_consumer.remote(self.get_testset,
+                                                            start_time,
+                                                            expected_itr=self.args.J,
+                                                            target_acc=self.args.target,
+                                                            autoexit=self.args.autoexit))
 
         for i, w in enumerate(self.workers):
             self.processes.extend([w.batch_producer.remote(self.get_trainset, t=t[i]), w.batch_consumer.remote(start_time)])

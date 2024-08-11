@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
 
-from . import shards
+import shards
 
 class CIFARShards(shards.Shards):
     class Net(nn.Module):
@@ -51,8 +51,8 @@ class CIFARShards(shards.Shards):
                                             download=True,
                                             transform=self.test_transform)
 
-    def trainset(self):
+    def trainset(self, idx=None):
         return torchvision.datasets.CIFAR10(root='~/spot_aws/data',
                                             train=True,
                                             download=True,
-                                            transform=self.train_transform)
+                                            transform=self.train_transform), False

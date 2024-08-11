@@ -57,8 +57,12 @@ class InstanceAllocation(object):
         self.t = args.d
         self.a = args.a
         self.cycles = cycles
-        self.q_turn_off = 1 / (self.a * cycles)
-        self.q_turn_on = 1 / ((1 - self.a) * cycles)
+        if self.a >= 1.0:
+            self.q_turn_off = 0
+            self.q_turn_on = 1
+        else:
+            self.q_turn_off = 1 / (self.a * cycles)
+            self.q_turn_on = 1 / ((1 - self.a) * cycles)
 
     def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
         spot = np.zeros(self.N)
@@ -67,19 +71,23 @@ class InstanceAllocation(object):
         if a == None:
             a = self.a
 
+        if a >= 1:
+            return np.ones(self.N)
+
         if p_spot >= p_on_demand or not p_on_demand:
             pass
 
         elif np.isscalar(l):
             #FIXED RATE
-            NS = np.floor((self.N - (J * self.b) / (l * float(t))) / max(1 - a, 1e-6)).astype(int)
+            NS = np.floor((self.N - (J * self.b) / (l * t)) / (1 - a)).astype(int)
             NS = min(NS, self.N)
+            print(NS)
             spot[:NS] = 1
 
         elif isinstance(l, np.ndarray):
             #VARIABLE RATE
             l_arg = np.argsort(l)
-            threshold = (np.sum(l) - (J * self.b / float(t))) / max(1 - a, 1e-6)
+            threshold = (np.sum(l) - (J * self.b / t)) / (1 - a)
             cost = np.inf
             rate_sum = 0
             spot_indices = []
@@ -97,6 +105,7 @@ class InstanceAllocation(object):
                     cost = new_cost
 
             spot = np.zeros(self.N)
+            print(len(spot_indices))
             spot[spot_indices] = 1
 
         else:
@@ -108,9 +117,12 @@ class InstanceAllocation(object):
         return J * self.b * (self.N * p_spot + (a * p_spot - p_on_demand) * ns) / (np.sum(l) - (1 - a) * rate_sum)
 
     def preempt(self, state):
-        probs = state * self.q_turn_off
-        probs[probs == 0] = self.q_turn_on
-        return random.binomial(1, probs)
+        if self.q_turn_off <= 0:
+            return np.zeros(state.shape)
+        else:
+            probs = state * self.q_turn_off
+            probs[probs == 0] = self.q_turn_on
+            return random.binomial(1, probs)
 
     def get_stats(self):
         return {"expected_interations": self.J,

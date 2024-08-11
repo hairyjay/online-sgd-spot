@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
 
-from . import shards
+import shards
 
 class EMNISTShards(shards.Shards):
     class Net(nn.Module):
@@ -36,7 +36,7 @@ class EMNISTShards(shards.Shards):
             print("DEFAULT -- setting target to {}".format(self.args.target))
         self.train_transform = transforms.Compose([
                                torchvision.transforms.RandomPerspective(),
-                               torchvision.transforms.RandomAffine(30, translate=(0.1, 0.1), fill=(0,)),
+                               torchvision.transforms.RandomAffine(30, translate=(0.1, 0.1)),
                                torchvision.transforms.ToTensor(),
                                torchvision.transforms.Normalize((0.1307,), (0.3081,))
         ])
@@ -52,12 +52,12 @@ class EMNISTShards(shards.Shards):
                                             download=True,
                                             transform=self.test_transform)
 
-    def trainset(self):
+    def trainset(self, idx=None):
         return torchvision.datasets.EMNIST(root='~/spot_aws/data',
                                             split='bymerge',
                                             train=True,
                                             download=True,
-                                            transform=self.train_transform)
+                                            transform=self.train_transform), False
 
     '''
     class Net(nn.Module):
