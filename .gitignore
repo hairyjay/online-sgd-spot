@@ -1,7 +1,6 @@
 runs/
 price-trace/
 datasets/
-main/infimnist/data/
+main/infimnist/
 *.DS_Store
-.DS_Store
 .DS_Store

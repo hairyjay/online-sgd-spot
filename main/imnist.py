@@ -8,8 +8,8 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
 
-import shards
-from infimnist.infimnist_dataset import InfiMNIST
+from . import shards
+from infimnist import InfiMNIST
 
 class InfiMNISTShards(shards.Shards):
     class Net(nn.Module):

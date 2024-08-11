@@ -1,4 +1,4 @@
-import infimnist._infimnist as im
+import _infimnist as im
 import numpy as np
 import torch
 import torch.utils.data as data
