@@ -26,7 +26,7 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
 
 3. Launch a Ray cluster with custom resource configuration:
     ```
-    kubectl apply -f k8s-ray-cluster-test.yaml
+    kubectl apply -f k8s-rayscluster.yaml
     ```
 
 4. Start port forwarding to the Ray Dashboard in a separate shell tab:
@@ -34,7 +34,7 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     kubectl port-forward services/raycluster-head-svc 8265:8265
     ```
 
-5. Get the name of the head pod and also make sure all pods are running:
+5. Make sure all pods are running:
     ```
     kubectl get pods
     # NAME                               READY   STATUS    RESTARTS   AGE
@@ -44,10 +44,9 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     # raycluster-worker-doll-w-f9jlw     1/1     Running   0          26m
     ```
 
-6. Copy code files to head pod:
+6. Copy code files and price trace data to head pod:
     ```
-    kubectl cp ./main $HEAD-POD-NAME:/home/ray
-    kubectl cp ./price-trace $HEAD-POD-NAME:/home/ray
+    bash copy-all.sh
     ```
     
 
