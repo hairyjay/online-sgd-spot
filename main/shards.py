@@ -2,7 +2,7 @@ import numpy as np
 import numpy.random as random
 import ray
 
-import actors
+from . import actors
 
 class Shards(actors.Coordinator):
     def __init__(self, args, pricing):

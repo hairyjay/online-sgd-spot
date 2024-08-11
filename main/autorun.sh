@@ -7,7 +7,7 @@
 #done
 i=0
 
-while [ $(ls -l ./runs/ | grep -c ^d) -lt 4 ]
+while [ $(ls -l ./runs/ | grep -c ^d) -lt 12 ]
 do
   echo "RUN $i START"
   #python ./main/preempt.py --size=64 --K=20 --bs=256 --d=6264 --a=1 -e -f --optimizer=adam #EMNIST ADAM ONDEMAND
