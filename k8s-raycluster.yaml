@@ -31,9 +31,18 @@ spec:
             postStart:
               exec:
                 command:
-                  - ["/bin/sh","-c","pip install torch torchvision"]
-                  - ["/bin/sh","-c","sudo apt-get update"]
-                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
+                  - "/bin/sh"
+                  - "-c"
+                  - >-
+                      sudo apt-get update;
+                      sudo apt-get -y install build-essential;
+                      sudo apt-get -y install curl;
+                      pip install torch torchvision Cython==3.0.11;
+                      git clone https://github.com/hairyjay/infimnist_py.git;
+                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
+                      tar -xvzf infimnist.tar.gz;
+                      cp -r infimnist/data/ infimnist_py/;
+                      cd infimnist_py && python setup.py build_ext -if
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -72,25 +81,28 @@ spec:
             postStart:
               exec:
                 command:
-                  - ["/bin/sh","-c","pip install torch torchvision"]
-                  - ["/bin/sh","-c","sudo apt-get update"]
-                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
-                  - ["/bin/sh","-c","sudo apt-get install curl"]
-                  - ["/bin/sh","-c","git clone https://github.com/hairyjay/infimnist_py.git"]
-                  - ["/bin/sh","-c","curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz"]
-                  - ["/bin/sh","-c","tar -xvzf infimnist.tar.gz"]
-                  - ["/bin/sh","-c","cp -r infimnist/data/ infimnist_py/"]
-                  - ["/bin/sh","-c","pip install infimnist_py/"]
+                  - "/bin/sh"
+                  - "-c"
+                  - >-
+                      sudo apt-get update;
+                      sudo apt-get -y install build-essential;
+                      sudo apt-get -y install curl;
+                      pip install torch torchvision Cython==3.0.11;
+                      git clone https://github.com/hairyjay/infimnist_py.git;
+                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
+                      tar -xvzf infimnist.tar.gz;
+                      cp -r infimnist/data/ infimnist_py/;
+                      cd infimnist_py && python setup.py build_ext -if
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
-          resources:ls
+          resources:
             limits:
               cpu: "2"
               memory: "24G"
             requests:
               cpu: "1500m"
-              memory: "1G"
+              memory: "3G"
   - groupName: doll-ts
     replicas: 1
     minReplicas: 1
@@ -116,9 +128,18 @@ spec:
             postStart:
               exec:
                 command:
-                  - ["/bin/sh","-c","pip install torch torchvision"]
-                  - ["/bin/sh","-c","sudo apt-get update"]
-                  - ["/bin/sh","-c","sudo apt-get install build-essential"]
+                  - "/bin/sh"
+                  - "-c"
+                  - >-
+                      sudo apt-get update;
+                      sudo apt-get -y install build-essential;
+                      sudo apt-get -y install curl;
+                      pip install torch torchvision Cython==3.0.11;
+                      git clone https://github.com/hairyjay/infimnist_py.git;
+                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
+                      tar -xvzf infimnist.tar.gz;
+                      cp -r infimnist/data/ infimnist_py/;
+                      cd infimnist_py && python setup.py build_ext -if
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]

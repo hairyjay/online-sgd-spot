@@ -46,6 +46,7 @@ class ParameterServer(object):
 
     def ready_signal(self, worker_index):
         self.ready_workers[worker_index] = True
+        print("READY", self.ready_workers)
         if all(self.ready_workers):
             self.training = True
             print("CALIBRATION COMPLETE: READY TO TRAIN")
@@ -129,13 +130,15 @@ class ParameterServer(object):
         test_server.test_acc.remote(weights, self.processed)
         del weights
 
-    async def price_producer(self, l, allocation, adaptive=False):
+    async def price_producer(self, workers, l, allocation, adaptive=False):
+        if self.workers is None:
+            self.workers = workers
+    
         self.p_spot, update_time = self.price_distr.get_price()
         self.p_on_demand = self.price_distr.get_on_demand()
 
         while not self.training:
             await asyncio.sleep(0)
-        print("START ParameterServer.price_producer(): {}".format(self.workers))
         N = len(self.workers)
 
         #for adaptive method
@@ -221,7 +224,6 @@ class ParameterServer(object):
                 self.workers[i].restart.remote()
             else:
                 self.workers[i].preempt.remote()
-        #print("running workers: {}".format(np.logical_or((1 - spot), state)))
         print("NS = {}, number running = {}".format(np.sum(self.persistence), np.sum(np.logical_or((1 - self.persistence), self.spot_state))))
 
     def adap_allocate(self, allocation):
@@ -249,7 +251,6 @@ class TestServer(object):
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.is_testset_list = False
         self.net = Net().to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
         self.training = False
@@ -264,20 +265,17 @@ class TestServer(object):
         self.queue.put_nowait(itr)
 
     async def valid_consumer(self, get_testset, start_time, expected_itr=200000, target_acc=None, autoexit=False):
-        while not self.training:
-            await asyncio.sleep(0)
-
         testset = get_testset(self.device.type)
         if self.device.type == 'cpu':
             batch_size = 128
         else:
             batch_size = 1024
-        self.is_testset_list = isinstance(testset, list)
-        if self.is_testset_list:
-            test_loader = [torch.utils.data.DataLoader(s, batch_size=batch_size, shuffle=False) for s in testset]
-        else:
-            test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
         accuracy = []
+
+        while not self.training:
+            await asyncio.sleep(0)
+        print("TRAINING STARTED, TEST SERVER READY")
 
         while True:
             itr = await self.queue.get()
@@ -312,32 +310,9 @@ class TestServer(object):
 
     def get_acc(self, test_loader):
         self.net.eval()
-        if self.device.type == 'cpu' and self.is_testset_list:
-            self.net.share_memory()
-            manager = mp.Manager()
-            results = manager.dict()
-            processes = []
-            for i, loader in enumerate(test_loader):
-                p = mp.Process(target=self.test_cpu, args=(loader, i, results))
-                processes.append(p)
-                p.start()
-            for p in processes:
-                p.join()
-            sum = 0
-            count = 0
-            loss = 0
-            for r in results:
-                sum += results[r][0]
-                count += results[r][1]
-                loss += results[r][2]
-            return sum / count, loss
-        else:
-            return self.test_gpu(test_loader)
-
-    def test_gpu(self, loader):
         top1 = data_tools.AverageMeter()
         loss = 0
-        for batch_idx, (inputs, targets) in enumerate(loader):
+        for batch_idx, (inputs, targets) in enumerate(test_loader):
             outputs = self.net(inputs.to(self.device))
             l = self.criterion(outputs, targets.to(self.device))
             acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
@@ -345,19 +320,7 @@ class TestServer(object):
             loss += l.item()
             del outputs, l
         return top1.avg.item(), loss
-
-    def test_cpu(self, loader, i, results):
-        top1 = data_tools.AverageMeter()
-        loss = 0
-        for batch_idx, (inputs, targets) in enumerate(loader):
-            outputs = self.net(inputs.to(self.device))
-            l = self.criterion(outputs, targets.to(self.device))
-            acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
-            top1.update(acc1[0], inputs.size(0))
-            loss += l.item()
-            del outputs, l
-        results[i] = (top1.sum.item(), top1.count, loss)
-
+    
     def terminate(self):
         self.queue.put_nowait("stop")
         return {"target_itr": self.target_itr}
@@ -480,10 +443,10 @@ class Worker(object):
             #print(self.curritr, self.preempt)
 
             if not self.preempt:
-                #print(data[0].size(), target[0])
+                #print("DATA AND TARGET", data[0].size(), target[0])
                 data = torch.cat(data, 0)
-                target = torch.cat(target, 0)
-                #print(data.shape, target.shape)
+                target = torch.tensor(target, dtype=torch.long)
+                #print(data.shape, target.shape, target.dtype)
                 self.batches[self.curritr] = (data, target)
                 self.arrival_time.append([self.curritr, time.time() - start_time])
 
@@ -497,6 +460,7 @@ class Worker(object):
             param.data = weights[i].to(self.device)
 
         data, target = self.batches[itr]
+        #print(data.shape, target.shape)
         # data, target = data.cuda(), target.cuda()
         output = self.net(data.to(self.device))
         loss = self.criterion(output, target.to(self.device))

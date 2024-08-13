@@ -9,7 +9,7 @@ import torchvision
 from torchvision import datasets, transforms
 
 from . import shards
-from infimnist import InfiMNIST
+from infimnist_py.infimnist_dataset import InfiMNIST
 
 class InfiMNISTShards(shards.Shards):
     class Net(nn.Module):
@@ -37,6 +37,9 @@ class InfiMNISTShards(shards.Shards):
             self.is_infinite = True
             super().__init__(train, num_transformations, transform, target_transform)
 
+        def __getitem__(self, index):
+            img, target = super().__getitem__(index)
+            return img.unsqueeze(0), target
 
     def __init__(self, args, pricing):
         super().__init__(args, pricing)

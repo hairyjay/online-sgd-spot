@@ -15,16 +15,7 @@ class Shards(actors.Coordinator):
         pass
 
     def get_testset(self, type='cuda'):
-        #print(type)
-        set = self.testset()
-        if type == 'cpu':
-            THREADS = 4
-            partition_sizes = [1.0 / THREADS for _ in range(THREADS)]
-            partition = DataPartitioner(set, partition_sizes, isNonIID=False)
-            partitions = [partition.use(i) for i in range(THREADS)]
-            return partitions
-        else:
-            return set
+        return self.testset()
 
     def get_trainset(self, idx):
         dataset, is_shard = self.trainset(idx)
