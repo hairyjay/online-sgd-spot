@@ -46,7 +46,7 @@ class ParameterServer(object):
 
     def ready_signal(self, worker_index):
         self.ready_workers[worker_index] = True
-        print("READY", self.ready_workers)
+        #print("READY", self.ready_workers)
         if all(self.ready_workers):
             self.training = True
             print("CALIBRATION COMPLETE: READY TO TRAIN")
@@ -336,6 +336,7 @@ class Worker(object):
         self.ps = ps
         self.curritr = 0
         self.batches = {}
+        self.grads = {}
         self.B = B
         self.lr = lr
         self.queue = asyncio.Queue()
@@ -398,6 +399,9 @@ class Worker(object):
         self.batch_eps = delay_calib / calib_rounds
         print("DELAY EPS: {}".format(self.batch_eps))
         self.ps.ready_signal.remote(self.worker_index)
+        while not self.queue.empty():
+            self.queue.get_nowait()
+            self.queue.task_done()
 
         while not self.training:
             await asyncio.sleep(0)
@@ -455,6 +459,8 @@ class Worker(object):
 
     def compute_gradients(self, weights, itr):
         batch_start = time.time()
+        if itr-1 in self.grads:
+            del self.grads[itr-1]
 
         for i, param in enumerate(self.net.parameters()):
             param.data = weights[i].to(self.device)
@@ -467,13 +473,15 @@ class Worker(object):
         self.optimizer.zero_grad()
         loss.backward()
 
-        grads = []
+        self.grads[itr] = []
         for param in self.net.parameters():
-            grads.append(param.grad.data.numpy())
+            self.grads[itr].append(param.grad.data.numpy())
 
         del self.batches[itr], data, target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
-        return grads
+        if self.worker_index == 0:
+            print(itr, self.queue.qsize(), len(self.grads.keys()), len(self.gradient_time), len(self.arrival_time), len(self.accs))
+        return self.grads[itr]
 
     def preempt(self):
         self.preempt = True

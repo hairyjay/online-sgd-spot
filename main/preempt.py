@@ -29,7 +29,7 @@ parser.add_argument('--t', default=0.008, type=float, help='mean inter-arrival t
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0, type=float, help='target accuracy')
-parser.add_argument('--J', default=195000, type=int, help='target interations')
+parser.add_argument('--J', default=195000, type=int, help='target iterations')
 parser.add_argument('--d', default=5580, type=int, help='target deadline')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
 parser.add_argument('--a', default=0.95, type=float, help='spot instance availability')
