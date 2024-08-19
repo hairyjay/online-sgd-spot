@@ -7,9 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
+from torchvision.transforms import v2
+from kornia.morphology import erosion, dilation
 
 from . import shards
-from infimnist_py.infimnist_dataset import InfiMNIST
+print("torchvision version: {}".format(torchvision.__version__))
 
 class InfiMNISTShards(shards.Shards):
     class Net(nn.Module):
@@ -29,17 +31,15 @@ class InfiMNISTShards(shards.Shards):
             x = F.relu(self.fc1(x))
             x = self.fc2(x)
             return F.log_softmax(x, dim=1)
-
-    class InfiMNISTTrain(InfiMNIST):
-        def __init__(self, idx, N, train=True, num_transformations=1, transform=None, target_transform=None):
-            self.N = N
-            self.idx = idx
-            self.is_infinite = True
-            super().__init__(train, num_transformations, transform, target_transform)
-
-        def __getitem__(self, index):
-            img, target = super().__getitem__(index)
-            return img.unsqueeze(0), target
+    
+    def rand_thicken(image:torch.Tensor) -> torch.Tensor:
+        image = torch.unsqueeze(image, 0)
+        t = torch.randint(1, 3, (2,))
+        kernel = torch.ones((t[0], t[1]))
+        if np.random.rand() < 0.5:
+            return torch.squeeze(erosion(image, kernel=kernel), 0)
+        else:
+            return torch.squeeze(dilation(image, kernel=kernel), 0)
 
     def __init__(self, args, pricing):
         super().__init__(args, pricing)
@@ -47,25 +47,26 @@ class InfiMNISTShards(shards.Shards):
             self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))
         self.train_transform = transforms.Compose([
-                               torchvision.transforms.RandomPerspective(),
-                               torchvision.transforms.RandomAffine(30, translate=(0.1, 0.1)),
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize((0.1307,), (0.3081,))
+                               v2.Lambda(self.rand_thicken),
+                               v2.ElasticTransform(alpha=30.0, sigma=3.0),
+                               transforms.RandomPerspective(),
+                               transforms.RandomAffine(30, translate=(0.1, 0.1)),
+                               transforms.ToTensor(),
+                               transforms.Normalize((0.1307,), (0.3081,))
         ])
         self.test_transform = transforms.Compose([
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize((0.1307,), (0.3081,))
+                               transforms.ToTensor(),
+                               transforms.Normalize((0.1307,), (0.3081,))
         ])
 
     def testset(self):
-        return torchvision.datasets.MNIST(root='~/spot_aws/data',
+        return datasets.MNIST(root='~/spot_aws/data',
                                         train=False,
                                         download=True,
                                         transform=self.test_transform)
 
     def trainset(self, idx):
-        return self.InfiMNISTTrain(idx, self.args.size,
-                                train=True,
-                                num_transformations=4,
-                                transform=self.train_transform,
-                                target_transform=None), True
+        return datasets.MNIST(root='~/spot_aws/data',
+                                        train=True,
+                                        download=True,
+                                        transform=self.test_transform), False

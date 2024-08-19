@@ -37,12 +37,7 @@ spec:
                       sudo apt-get update;
                       sudo apt-get -y install build-essential;
                       sudo apt-get -y install curl;
-                      pip install torch torchvision Cython==3.0.11;
-                      git clone https://github.com/hairyjay/infimnist_py.git;
-                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
-                      tar -xvzf infimnist.tar.gz;
-                      cp -r infimnist/data/ infimnist_py/;
-                      cd infimnist_py && python setup.py build_ext -if
+                      pip install torch torchvision kornia
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -58,7 +53,7 @@ spec:
   # the pod replicas in this group typed worker
   - groupName: doll-w
     replicas: 64
-    minReplicas: 1
+    minReplicas: 64
     maxReplicas: 64
     # logical group name, for this called small-group, also can be functional
     
@@ -87,12 +82,7 @@ spec:
                       sudo apt-get update;
                       sudo apt-get -y install build-essential;
                       sudo apt-get -y install curl;
-                      pip install torch torchvision Cython==3.0.11;
-                      git clone https://github.com/hairyjay/infimnist_py.git;
-                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
-                      tar -xvzf infimnist.tar.gz;
-                      cp -r infimnist/data/ infimnist_py/;
-                      cd infimnist_py && python setup.py build_ext -if
+                      pip install torch torchvision kornia
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]
@@ -134,12 +124,7 @@ spec:
                       sudo apt-get update;
                       sudo apt-get -y install build-essential;
                       sudo apt-get -y install curl;
-                      pip install torch torchvision Cython==3.0.11;
-                      git clone https://github.com/hairyjay/infimnist_py.git;
-                      curl -O https://leon.bottou.org/_media/projects/infimnist.tar.gz;
-                      tar -xvzf infimnist.tar.gz;
-                      cp -r infimnist/data/ infimnist_py/;
-                      cd infimnist_py && python setup.py build_ext -if
+                      pip install torch torchvision kornia
             preStop:
               exec:
                 command: ["/bin/sh","-c","ray stop"]

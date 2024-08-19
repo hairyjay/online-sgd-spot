@@ -479,8 +479,6 @@ class Worker(object):
 
         del self.batches[itr], data, target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
-        if self.worker_index == 0:
-            print(itr, self.queue.qsize(), len(self.grads.keys()), len(self.gradient_time), len(self.arrival_time), len(self.accs))
         return self.grads[itr]
 
     def preempt(self):
