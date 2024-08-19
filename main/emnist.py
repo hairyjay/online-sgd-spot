@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 from torchvision import datasets, transforms
+from torchvision.transforms import v2
+from kornia.morphology import erosion, dilation
 
 from . import shards
 
@@ -35,6 +37,8 @@ class EMNISTShards(shards.Shards):
             self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))
         self.train_transform = transforms.Compose([
+                               v2.Lambda(shards.rand_thicken),
+                               v2.ElasticTransform(alpha=30.0, sigma=3.0),
                                torchvision.transforms.RandomPerspective(),
                                torchvision.transforms.RandomAffine(30, translate=(0.1, 0.1)),
                                torchvision.transforms.ToTensor(),

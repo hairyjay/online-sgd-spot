@@ -11,7 +11,6 @@ from torchvision.transforms import v2
 from kornia.morphology import erosion, dilation
 
 from . import shards
-print("torchvision version: {}".format(torchvision.__version__))
 
 class InfiMNISTShards(shards.Shards):
     class Net(nn.Module):
@@ -31,15 +30,6 @@ class InfiMNISTShards(shards.Shards):
             x = F.relu(self.fc1(x))
             x = self.fc2(x)
             return F.log_softmax(x, dim=1)
-    
-    def rand_thicken(image:torch.Tensor) -> torch.Tensor:
-        image = torch.unsqueeze(image, 0)
-        t = torch.randint(1, 3, (2,))
-        kernel = torch.ones((t[0], t[1]))
-        if np.random.rand() < 0.5:
-            return torch.squeeze(erosion(image, kernel=kernel), 0)
-        else:
-            return torch.squeeze(dilation(image, kernel=kernel), 0)
 
     def __init__(self, args, pricing):
         super().__init__(args, pricing)
@@ -47,7 +37,7 @@ class InfiMNISTShards(shards.Shards):
             self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))
         self.train_transform = transforms.Compose([
-                               v2.Lambda(self.rand_thicken),
+                               v2.Lambda(shards.rand_thicken),
                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
                                transforms.RandomPerspective(),
                                transforms.RandomAffine(30, translate=(0.1, 0.1)),

@@ -10,7 +10,7 @@ i=0
 while [ $(ls -l ./runs/ | grep -c ^d) -lt 12 ]
 do
   echo "RUN $i START"
-  python -m main.preempt --size=64 --K=10 --bs=256 --d=1613 --a=0.9 -e --J=48000 --target=0.97 --dataset=imnist #InfiMNIST ONDEMAND
+  python -m main.preempt --size=64 --K=10 --bs=256 --d=6264 --a=1 -e
   echo "RUN $i END"
   i=$[$i+1]
 done
