@@ -1,11 +1,8 @@
 import numpy as np
-import numpy.random as random
-import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from kornia.morphology import erosion, dilation
@@ -36,32 +33,49 @@ class EMNISTShards(shards.Shards):
         if self.args.target == 0:
             self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))
+        self.norm_mean = 0.1307
+        self.norm_std = 0.3081
+        self.norm_min = -0.42421296
         self.train_transform = transforms.Compose([
-                               v2.Lambda(shards.rand_thicken),
+                               transforms.PILToTensor(),
+                               v2.Lambda(self.rand_thicken),
                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
-                               torchvision.transforms.RandomPerspective(),
-                               torchvision.transforms.RandomAffine(30, translate=(0.1, 0.1)),
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize((0.1307,), (0.3081,))
+                               transforms.RandomPerspective(),
+                               transforms.RandomAffine(30, translate=(0.1, 0.1)),
+                               transforms.Normalize((self.norm_mean,), (self.norm_std,)),
+                               v2.Lambda(self.fill_nan)
         ])
         self.test_transform = transforms.Compose([
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize((0.1307,), (0.3081,))
+                               transforms.ToTensor(),
+                               transforms.Normalize((self.norm_mean,), (self.norm_std,)),
+                               v2.Lambda(self.fill_nan)
         ])
 
     def testset(self):
-        return torchvision.datasets.EMNIST(root='~/spot_aws/data',
+        return datasets.EMNIST(root='~/spot_aws/data',
                                             split='bymerge',
                                             train=False,
                                             download=True,
                                             transform=self.test_transform)
 
     def trainset(self, idx=None):
-        return torchvision.datasets.EMNIST(root='~/spot_aws/data',
+        return datasets.EMNIST(root='~/spot_aws/data',
                                             split='bymerge',
                                             train=True,
                                             download=True,
                                             transform=self.train_transform), False
+
+    def rand_thicken(self, image:torch.Tensor) -> torch.Tensor:
+        image = torch.unsqueeze(image.float(), 0)
+        t = torch.randint(1, 3, (2,))
+        kernel = torch.ones((t[0], t[1]))
+        if np.random.rand() < 0.5:
+            return torch.squeeze(erosion(image, kernel=kernel), 0)
+        else:
+            return torch.squeeze(dilation(image, kernel=kernel), 0)
+        
+    def fill_nan(self, image:torch.Tensor) -> torch.Tensor:
+        return torch.nan_to_num(image, nan=self.norm_min)
 
     '''
     class Net(nn.Module):

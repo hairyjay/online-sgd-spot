@@ -1,4 +1,3 @@
-import numpy as np
 import numpy.random as random
 import ray
 
@@ -89,12 +88,3 @@ class DataPartitioner(object):
 
     def use(self, partition):
         return Partition(self.data, self.partitions[partition])
-
-def rand_thicken(image:torch.Tensor) -> torch.Tensor:
-    image = torch.unsqueeze(image, 0)
-    t = torch.randint(1, 3, (2,))
-    kernel = torch.ones((t[0], t[1]))
-    if np.random.rand() < 0.5:
-        return torch.squeeze(erosion(image, kernel=kernel), 0)
-    else:
-        return torch.squeeze(dilation(image, kernel=kernel), 0)

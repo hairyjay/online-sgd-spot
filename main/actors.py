@@ -109,8 +109,13 @@ class ParameterServer(object):
 
     def apply_gradients(self, gradients):
         #print(type(gradients), [type(g) for g in gradients])
+        #print(np.max([np.max([np.max(i) for i in g]) for g in gradients]), np.min([np.min([np.min(i) for i in g]) for g in gradients]))
         #for g in gradients:
             #print(len(g), [(type(i), np.size(i)) for i in g])
+            #for i in g:
+                #if np.isnan(i).any():
+                    #print("AAAAAAAAAAAAAAAA NAN NAN NAN NAN NAN NAN NAN")
+                    #print(i)
         #grad = []
         #for i in range(len(gradients[0])):
             #grad.append(np.mean([g[i] for g in gradients]))
@@ -153,6 +158,8 @@ class ParameterServer(object):
         prices = self.persistence * self.p_spot
         prices[prices == 0] = self.p_on_demand
         self.spot_state = np.ones(N)
+        self.ns = np.sum(self.persistence)
+        self.running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
 
         last_update = time.time()
         print("starting spot price set to {}".format(self.p_spot))
@@ -214,6 +221,7 @@ class ParameterServer(object):
         return 'price', np.array(self.cost_log)
 
     def refresh_workers(self, allocation, adaptive):
+        
         switch = allocation.preempt(self.spot_state)
         #if adaptive:
             #self.adap_allocate(allocation)
@@ -224,7 +232,12 @@ class ParameterServer(object):
                 self.workers[i].restart.remote()
             else:
                 self.workers[i].preempt.remote()
-        print("NS = {}, number running = {}".format(np.sum(self.persistence), np.sum(np.logical_or((1 - self.persistence), self.spot_state))))
+        new_ns = np.sum(self.persistence)
+        new_running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
+        if self.ns != new_ns or self.running != new_running:
+            print("NS = {}, number running = {}".format(new_ns, new_running))
+            self.ns = new_ns
+            self.running = new_running
 
     def adap_allocate(self, allocation):
         elapsed = time.time() - self.start_time
@@ -362,6 +375,10 @@ class Worker(object):
         return True
 
     def signal(self, data, target):
+        #if torch.isnan(data).any():
+            #print(torch.isnan(data).any())
+            #print("FOUND NaN; SEED: {}".format(torch.seed()))
+            #print(data.numpy())
         self.queue.put_nowait((data, target))
         return True
 
@@ -448,7 +465,7 @@ class Worker(object):
 
             if not self.preempt:
                 #print("DATA AND TARGET", data[0].size(), target[0])
-                data = torch.cat(data, 0)
+                data = torch.nan_to_num(torch.cat(data, 0))
                 target = torch.tensor(target, dtype=torch.long)
                 #print(data.shape, target.shape, target.dtype)
                 self.batches[self.curritr] = (data, target)
@@ -466,9 +483,12 @@ class Worker(object):
             param.data = weights[i].to(self.device)
 
         data, target = self.batches[itr]
-        #print(data.shape, target.shape)
-        # data, target = data.cuda(), target.cuda()
+        #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
+        self.net.train()
         output = self.net(data.to(self.device))
+        #if torch.isnan(output).any():
+            #print(output, target)
+            #print(torch.isnan(data).any())
         loss = self.criterion(output, target.to(self.device))
         self.optimizer.zero_grad()
         loss.backward()

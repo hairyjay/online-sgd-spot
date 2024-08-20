@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
+from torchvision import transforms
 from torchvision.transforms import v2, PILToTensor
-from torchvision.datasets import MNIST
+from torchvision.datasets import EMNIST
 
 plt.rcParams["savefig.bbox"] = 'tight'
 
@@ -17,11 +18,14 @@ torch.manual_seed(0)
 # helpers from https://github.com/pytorch/vision/tree/main/gallery/
 #from helpers import plot
 
-dataset = MNIST(root='.venv/data',
+dataset = EMNIST(root='.venv/data',
+                split='bymerge',
                 train=False,
                 download=True)
-orig_img, label = dataset[7]
+                
+orig_img, label = dataset[5]
 totensor = PILToTensor()
+print(label)
 
 from kornia.morphology import erosion, dilation
 def thicken(image:torch.Tensor) -> torch.Tensor:
@@ -35,8 +39,15 @@ def thicken(image:torch.Tensor) -> torch.Tensor:
     
 
 #transformer = v2.ElasticTransform(alpha=30.0, sigma=3.0)
-transformer = v2.Lambda(thicken)
-transformed_imgs = [np.asarray(torch.squeeze(transformer(totensor(orig_img)), 0)) for _ in range(31)]
+transformer = transforms.Compose([
+                               transforms.ToTensor(),
+                               v2.Lambda(thicken),
+                               v2.ElasticTransform(alpha=30.0, sigma=3.0),
+                               transforms.RandomPerspective(),
+                               transforms.RandomAffine(30, translate=(0.1, 0.1)),
+                               transforms.Normalize((0.1307,), (0.3081,))
+        ])
+transformed_imgs = [np.asarray(torch.squeeze(transformer(orig_img), 0)) for _ in range(31)]
 #print(orig_img.size())
 
 fig = plt.figure() 
