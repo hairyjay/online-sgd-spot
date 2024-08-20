@@ -34,9 +34,9 @@ parser.add_argument('--d', default=5580, type=int, help='target deadline')
 parser.add_argument('--size', default=8, type=int, help='number of workers')
 parser.add_argument('--a', default=0.95, type=float, help='spot instance availability')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
-parser.add_argument('--fixed', '-f', action='store_true', help='fixed or uniform pricing')
 parser.add_argument('--adap', '-d', action='store_true', help='adaptive method')
 parser.add_argument('--autoexit', '-e', action='store_true', help='whether to exit on its own')
+parser.add_argument('--distr', default='fixed', help='arrival rate distribution')
 parser.add_argument('--optimizer', default='sgd', help='optimizer')
 parser.add_argument('--dataset', default='emnist', help='experiment dataset')
 args = parser.parse_args()
@@ -59,9 +59,9 @@ if __name__ == "__main__":
     stats["allocation"] = allocation.get_stats()
 
     # DATA RATES
-    if args.fixed:
+    if args.distr == "fixed":
         rate_dist = rates.FixedRates(args.t)
-    else:
+    elif args.distr == "uniform":
         rate_dist = rates.UniformRates(args.t)
     stats["rate_dist"] = rate_dist.get_stats()
     print(stats)

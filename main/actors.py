@@ -1,15 +1,15 @@
 import numpy as np
-import numpy.random as random
 import ray
 import asyncio
 import time
 
 import torch
 import torch.optim as optim
-import torch.multiprocessing as mp
+#import torch.distributed as dist
+#import torch.multiprocessing as mp
 
 from . import data_tools
-from . import price
+#from . import price
 
 ##################################################################
 # parameter server
@@ -104,7 +104,7 @@ class ParameterServer(object):
             self.update_time.append([self.processed, time.time() - self.start_time])
 
             if self.processed % self.t == 0:
-                print("QUEUE SIZE: {}".format(self.queue.qsize()))
+                print("QUEUE SIZE AT BATCH {} ({}s ELAPSED): {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
                 self.queue_acc(test_server)
 
     def apply_gradients(self, gradients):
@@ -264,6 +264,7 @@ class TestServer(object):
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.is_testset_list = False
         self.net = Net().to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
         self.training = False
@@ -281,6 +282,7 @@ class TestServer(object):
         testset = get_testset(self.device.type)
         if self.device.type == 'cpu':
             batch_size = 128
+            torch.set_num_threads(4)
         else:
             batch_size = 1024
         test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
@@ -355,6 +357,7 @@ class Worker(object):
         self.queue = asyncio.Queue()
         self.training = False
         self.batch_eps = 0
+        self.rng = np.random.default_rng()
 
         self.running = True
         self.preempt = False
@@ -384,54 +387,28 @@ class Worker(object):
 
     async def batch_producer(self, get_trainset, t=0.001):
         trainset = get_trainset(self.worker_index)
+        i = 0
         if hasattr(trainset, "is_infinite"):
             infinite_set = True
-            i = 0
         else:
             infinite_set = False
-            train_loader = torch.utils.data.DataLoader(trainset, batch_size=1, shuffle=True)
+            train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
             iterator = iter(train_loader)
 
-        # CALIBRATING FOR TIME DELAYS
-        calib_rounds = 1000
-        delay_calib = 0
-        for i in range(calib_rounds):
-            delay_start = time.time()
-            if infinite_set:
-                data, target = trainset[i]
-                i += 1
-            else:
-                try:
-                    data, target = next(iterator)
-                except StopIteration:
-                    iterator = iter(train_loader)
-                    data, target = next(iterator)
-            self.signal(data, target)
-            if infinite_set:
-                del data, target
-            wait_time = random.exponential(t)
-            delay_end = time.time()
-            await asyncio.sleep(0)
-            delay_calib += delay_end - delay_start
-        self.batch_eps = delay_calib / calib_rounds
-        print("DELAY EPS: {}".format(self.batch_eps))
         self.ps.ready_signal.remote(self.worker_index)
-        while not self.queue.empty():
-            self.queue.get_nowait()
-            self.queue.task_done()
 
         while not self.training:
             await asyncio.sleep(0)
 
         start_time = time.time()
         print("WORKER {}: TRAINING READY AT TIME {}".format(self.worker_index, start_time))
-        #i = 0
 
         while self.running:
             # SIGNAL QUEUE
+            i += 1
+            batch_start = time.time()
             if infinite_set:
                 data, target = trainset[i]
-                i += 1
             else:
                 try:
                     data, target = next(iterator)
@@ -443,30 +420,28 @@ class Worker(object):
                 del data, target
 
             # SIMULATE DATA INTER-ARRIVAL TIME
-            wait_time = random.exponential(t - 0.00175) #ADJUSTED FOR OTHER DELAYS
+            w = self.rng.gamma(self.B, t)
+            batch_eps = time.time() - batch_start
+            wait_time = np.max([0, w - batch_eps]) #ADJUSTED FOR OTHER DELAYS
+            #if self.worker_index == 0:
+                #print("RNG: {} BATCH DELAY: {} NEXT BATCH: {}".format(w, batch_eps, wait_time))
             await asyncio.sleep(wait_time)
-            #i += 1
-            #if i == 20000 or (i % 200000) == 0:
-                #print("ARRIVAL RATE AT {} ARRIVALS: {}".format(i, (time.time() - start_time) / i))
+            #if i == 100 or (i % 1000) == 0:
+                #print("ARRIVAL RATE AT {} ARRIVALS: {}".format(i, (time.time() - start_time) / (i * self.B)))
 
     async def batch_consumer(self, start_time):
         while True:
-            data, target = [], []
-            for i in range(self.B):
-                d, t = await self.queue.get()
-                if d == "stop":
-                    arrival_time = np.array(self.arrival_time)
-                    gradient_time = np.array(self.gradient_time)
-                    return str(self.worker_index), arrival_time, gradient_time
-                data.append(d)
-                target.append(t)
-                self.queue.task_done()
+            data, target = await self.queue.get()
+            if data == "stop":
+                arrival_time = np.array(self.arrival_time)
+                gradient_time = np.array(self.gradient_time)
+                return str(self.worker_index), arrival_time, gradient_time
+            self.queue.task_done()
             #print(self.curritr, self.preempt)
 
             if not self.preempt:
                 #print("DATA AND TARGET", data[0].size(), target[0])
-                data = torch.nan_to_num(torch.cat(data, 0))
-                target = torch.tensor(target, dtype=torch.long)
+                data = torch.nan_to_num(data)
                 #print(data.shape, target.shape, target.dtype)
                 self.batches[self.curritr] = (data, target)
                 self.arrival_time.append([self.curritr, time.time() - start_time])
