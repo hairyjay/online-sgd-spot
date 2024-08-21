@@ -36,52 +36,34 @@ class EMNISTShards(shards.Shards):
         self.norm_mean = 0.1307
         self.norm_std = 0.3081
         self.norm_min = -0.42421296
-        self.train_transform = torch.nn.Sequential(
+        self.train_transform = transforms.Compose([
+                               transforms.PILToTensor(),
                                v2.Lambda(self.rand_thicken),
                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
                                transforms.RandomPerspective(),
                                transforms.RandomAffine(30, translate=(0.1, 0.1)),
                                transforms.Normalize((self.norm_mean,), (self.norm_std,)),
                                v2.Lambda(self.fill_nan)
-        )
-        self.test_transform = torch.nn.Sequential(
+        ])
+        self.test_transform = transforms.Compose([
+                               transforms.ToTensor(),
                                transforms.Normalize((self.norm_mean,), (self.norm_std,)),
                                v2.Lambda(self.fill_nan)
-        )
-
-    def get_train_collate(self, device='cpu'):
-        def collate_fn(*args):
-            for i, a in enumerate(args):
-                if torch.is_tensor(a):
-                    a.to(device)
-                if i == 0:
-                    a = self.train_transform(a)
-            return a
-        return collate_fn
-    
-    def get_test_collate(self, device='cpu'):
-        def collate_fn(*args):
-            for i, a in enumerate(args):
-                if torch.is_tensor(a):
-                    a.to(device)
-                if i == 0:
-                    a = self.test_transform(a)
-            return a
-        return collate_fn
+        ])
 
     def testset(self):
         return datasets.EMNIST(root='~/spot_aws/data',
                                             split='bymerge',
                                             train=False,
                                             download=True,
-                                            transform=transforms.ToTensor())
+                                            transform=self.test_transform)
 
     def trainset(self, idx=None):
         return datasets.EMNIST(root='~/spot_aws/data',
                                             split='bymerge',
                                             train=True,
                                             download=True,
-                                            transform=transforms.ToTensor()), False
+                                            transform=self.train_transform), False
 
     def rand_thicken(self, image:torch.Tensor) -> torch.Tensor:
         image = torch.unsqueeze(image.float(), 0)

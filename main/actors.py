@@ -278,17 +278,14 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, get_test_transform, start_time, expected_itr=200000, target_acc=None, autoexit=False):
+    async def valid_consumer(self, get_testset, start_time, expected_itr=200000, target_acc=None, autoexit=False):
         testset = get_testset(self.device.type)
         if self.device.type == 'cpu':
             batch_size = 128
             torch.set_num_threads(4)
         else:
             batch_size = 1024
-        test_loader = torch.utils.data.DataLoader(testset,
-                                                  collate_fn=get_test_transform(self.device.type),
-                                                  batch_size=batch_size,
-                                                  shuffle=False)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
         accuracy = []
 
         while not self.training:
@@ -388,17 +385,14 @@ class Worker(object):
         self.queue.put_nowait((data, target))
         return True
 
-    async def batch_producer(self, get_trainset, get_train_transform, t=0.001):
+    async def batch_producer(self, get_trainset, t=0.001):
         trainset = get_trainset(self.worker_index)
         i = 0
         if hasattr(trainset, "is_infinite"):
             infinite_set = True
         else:
             infinite_set = False
-            train_loader = torch.utils.data.DataLoader(trainset,
-                                                       collate_fn= get_train_transform(self.device.type),
-                                                       batch_size=self.B,
-                                                       shuffle=True)
+            train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
             iterator = iter(train_loader)
 
         self.ps.ready_signal.remote(self.worker_index)
