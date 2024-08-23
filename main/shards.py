@@ -1,4 +1,5 @@
 import numpy.random as random
+import torch
 import ray
 
 from . import actors
@@ -15,16 +16,6 @@ class Shards(actors.Coordinator):
 
     def get_testset(self, type='cuda'):
         return self.testset()
-        set = self.testset()
-        if type == 'cpu':
-            THREADS = 2
-            partition_sizes = [1.0 / THREADS for _ in range(THREADS)]
-            partition = DataPartitioner(set, partition_sizes, isNonIID=False)
-            partitions = [partition.use(i) for i in range(THREADS)]
-            return partitions
-        else:
-            return set
-
 
     def get_trainset(self, idx):
         dataset, is_shard = self.trainset(idx)
@@ -35,6 +26,12 @@ class Shards(actors.Coordinator):
             partition = DataPartitioner(dataset, partition_sizes, isNonIID=False)
             partition = partition.use(idx)
             return partition
+        
+    def get_test_augment(self):
+        pass
+        
+    def get_train_augment(self):
+        pass
 
     def run(self, start_time, allocation, rate_dist=None, adaptive=False):
         t = [self.args.t] * self.args.size
@@ -45,13 +42,14 @@ class Shards(actors.Coordinator):
         self.processes.append(self.ps.queue_consumer.remote(self.workers, self.ts, start_time))
         self.processes.append(self.ps.price_producer.remote(self.workers, l, allocation, self.args.adap))
         self.processes.append(self.ts.valid_consumer.remote(self.get_testset,
+                                                            self.get_test_augment,
                                                             start_time,
                                                             expected_itr=self.args.J,
                                                             target_acc=self.args.target,
                                                             autoexit=self.args.autoexit))
 
         for i, w in enumerate(self.workers):
-            self.processes.extend([w.batch_producer.remote(self.get_trainset, t=t[i]), w.batch_consumer.remote(start_time)])
+            self.processes.extend([w.batch_producer.remote(self.get_trainset, self.get_train_augment, t=t[i]), w.batch_consumer.remote(start_time)])
 
     def autoexit(self):
         if self.args.autoexit:

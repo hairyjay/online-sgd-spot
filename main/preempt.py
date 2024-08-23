@@ -38,7 +38,7 @@ parser.add_argument('--adap', '-d', action='store_true', help='adaptive method')
 parser.add_argument('--autoexit', '-e', action='store_true', help='whether to exit on its own')
 parser.add_argument('--distr', default='fixed', help='arrival rate distribution')
 parser.add_argument('--optimizer', default='sgd', help='optimizer')
-parser.add_argument('--dataset', default='emnist', help='experiment dataset')
+parser.add_argument('--dataset', default='a-emnist', help='experiment dataset')
 args = parser.parse_args()
 
 if __name__ == "__main__":

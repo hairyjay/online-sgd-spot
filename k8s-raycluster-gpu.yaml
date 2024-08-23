@@ -48,7 +48,7 @@ spec:
               memory: "24G"
             requests:
               cpu: "3500m"
-              memory: "6G"
+              memory: "14G"
 
   workerGroupSpecs:
   # the pod replicas in this group typed worker
@@ -90,11 +90,13 @@ spec:
                 command: ["/bin/sh","-c","ray stop"]
           resources:
             limits:
-              cpu: "2"
+              cpu: "8"
               memory: "24G"
+              nvidia.com/gpu: "1"
             requests:
-              cpu: "1500m"
-              memory: "3G"
+              cpu: "3500m"
+              memory: "14G"
+              nvidia.com/gpu: "1"
   - groupName: doll-ts
     replicas: 1
     minReplicas: 1
@@ -112,7 +114,7 @@ spec:
           key: value
       spec:
         nodeSelector:
-          eks.amazonaws.com/nodegroup: ts
+          eks.amazonaws.com/nodegroup: w
         containers:
         - name: doll-test # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
           image: rayproject/ray:2.34.0

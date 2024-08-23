@@ -255,8 +255,8 @@ class ParameterServer(object):
 # test server
 ##################################################################
 
-#@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
-@ray.remote(num_cpus=4)             #CPU MODEL
+@ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
+#@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net):
         self.processed = 0
@@ -278,13 +278,14 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, start_time, expected_itr=200000, target_acc=None, autoexit=False):
+    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=200000, target_acc=None, autoexit=False):
         testset = get_testset(self.device.type)
+        self.augment = get_augment()
+        torch.set_num_threads(4)
         if self.device.type == 'cpu':
             batch_size = 128
-            torch.set_num_threads(4)
         else:
-            batch_size = 1024
+            batch_size = 4096
         test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
         accuracy = []
 
@@ -328,12 +329,15 @@ class TestServer(object):
         top1 = data_tools.AverageMeter()
         loss = 0
         for batch_idx, (inputs, targets) in enumerate(test_loader):
-            outputs = self.net(inputs.to(self.device))
-            l = self.criterion(outputs, targets.to(self.device))
-            acc1 = data_tools.comp_accuracy(outputs, targets.to(self.device))
+            inputs = self.augment(inputs.to(self.device))
+            targets = targets.to(self.device)
+            outputs = self.net(inputs)
+            l = self.criterion(outputs, targets)
+            acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
             loss += l.item()
             del outputs, l
+            a = time.time()
         return top1.avg.item(), loss
     
     def terminate(self):
@@ -385,8 +389,10 @@ class Worker(object):
         self.queue.put_nowait((data, target))
         return True
 
-    async def batch_producer(self, get_trainset, t=0.001):
+    async def batch_producer(self, get_trainset, get_augment, t=0.001):
+        torch.set_num_threads(4)
         trainset = get_trainset(self.worker_index)
+        self.augment = get_augment()
         i = 0
         if hasattr(trainset, "is_infinite"):
             infinite_set = True
@@ -460,7 +466,8 @@ class Worker(object):
         data, target = self.batches[itr]
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
         self.net.train()
-        output = self.net(data.to(self.device))
+        data = self.augment(data.to(self.device))
+        output = self.net(data)
         #if torch.isnan(output).any():
             #print(output, target)
             #print(torch.isnan(data).any())
