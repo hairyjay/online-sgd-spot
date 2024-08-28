@@ -47,8 +47,8 @@ spec:
               cpu: "4"
               memory: "24G"
             requests:
-              cpu: "3500m"
-              memory: "6G"
+              cpu: "3400m"
+              memory: "5.5G"
 
   workerGroupSpecs:
   # the pod replicas in this group typed worker
@@ -93,8 +93,8 @@ spec:
               cpu: "2"
               memory: "24G"
             requests:
-              cpu: "1500m"
-              memory: "3G"
+              cpu: "1700m"
+              memory: "7G"
   - groupName: doll-ts
     replicas: 1
     minReplicas: 1

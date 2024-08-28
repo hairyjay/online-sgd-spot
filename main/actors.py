@@ -355,7 +355,6 @@ class Worker(object):
         self.ps = ps
         self.curritr = 0
         self.batches = {}
-        self.grads = {}
         self.B = B
         self.lr = lr
         self.queue = asyncio.Queue()
@@ -381,25 +380,18 @@ class Worker(object):
         self.training = True
         return True
 
-    def signal(self, data, target):
-        #if torch.isnan(data).any():
-            #print(torch.isnan(data).any())
-            #print("FOUND NaN; SEED: {}".format(torch.seed()))
-            #print(data.numpy())
-        self.queue.put_nowait((data, target))
+    def signal(self, signal):
+        self.queue.put_nowait(signal)
         return True
 
     async def batch_producer(self, get_trainset, get_augment, t=0.001):
+        print(self.worker_index, 1/t, t)
         torch.set_num_threads(4)
         trainset = get_trainset(self.worker_index)
         self.augment = get_augment()
         i = 0
-        if hasattr(trainset, "is_infinite"):
-            infinite_set = True
-        else:
-            infinite_set = False
-            train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
-            iterator = iter(train_loader)
+        self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
+        self.iterator = iter(self.train_loader)
 
         self.ps.ready_signal.remote(self.worker_index)
 
@@ -413,17 +405,7 @@ class Worker(object):
             # SIGNAL QUEUE
             i += 1
             batch_start = time.time()
-            if infinite_set:
-                data, target = trainset[i]
-            else:
-                try:
-                    data, target = next(iterator)
-                except StopIteration:
-                    iterator = iter(train_loader)
-                    data, target = next(iterator)
-            self.signal(data, target)
-            if infinite_set:
-                del data, target
+            self.signal(i)
 
             # SIMULATE DATA INTER-ARRIVAL TIME
             w = self.rng.gamma(self.B, t)
@@ -437,8 +419,8 @@ class Worker(object):
 
     async def batch_consumer(self, start_time):
         while True:
-            data, target = await self.queue.get()
-            if data == "stop":
+            signal = await self.queue.get()
+            if signal == "stop":
                 arrival_time = np.array(self.arrival_time)
                 gradient_time = np.array(self.gradient_time)
                 return str(self.worker_index), arrival_time, gradient_time
@@ -446,10 +428,7 @@ class Worker(object):
             #print(self.curritr, self.preempt)
 
             if not self.preempt:
-                #print("DATA AND TARGET", data[0].size(), target[0])
-                data = torch.nan_to_num(data)
-                #print(data.shape, target.shape, target.dtype)
-                self.batches[self.curritr] = (data, target)
+                self.batches[self.curritr] = signal
                 self.arrival_time.append([self.curritr, time.time() - start_time])
 
                 self.ps.signal.remote(self.worker_index, self.curritr)
@@ -457,17 +436,19 @@ class Worker(object):
 
     def compute_gradients(self, weights, itr):
         batch_start = time.time()
-        if itr-1 in self.grads:
-            del self.grads[itr-1]
 
         for i, param in enumerate(self.net.parameters()):
             param.data = weights[i].to(self.device)
 
-        data, target = self.batches[itr]
+        try:
+            data, target = next(self.iterator)
+        except StopIteration:
+            self.iterator = iter(self.train_loader)
+            data, target = next(self.iterator)
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
         self.net.train()
-        data = self.augment(data.to(self.device))
-        output = self.net(data)
+        aug_data = self.augment(data.to(self.device))
+        output = self.net(aug_data)
         #if torch.isnan(output).any():
             #print(output, target)
             #print(torch.isnan(data).any())
@@ -475,13 +456,13 @@ class Worker(object):
         self.optimizer.zero_grad()
         loss.backward()
 
-        self.grads[itr] = []
+        grads = []
         for param in self.net.parameters():
-            self.grads[itr].append(param.grad.data.numpy())
+            grads.append(param.grad.data.numpy())
 
-        del self.batches[itr], data, target, output, loss
+        del self.batches[itr], data, aug_data, target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
-        return self.grads[itr]
+        return grads
 
     def preempt(self):
         self.preempt = True
@@ -490,7 +471,7 @@ class Worker(object):
         self.preempt = False
 
     def terminate(self):
-        self.queue.put_nowait(("stop", None))
+        self.queue.put_nowait("stop")
         self.running = False;
 
 ##################################################################

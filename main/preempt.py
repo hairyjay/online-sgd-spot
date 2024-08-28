@@ -63,6 +63,8 @@ if __name__ == "__main__":
         rate_dist = rates.FixedRates(args.t)
     elif args.distr == "uniform":
         rate_dist = rates.UniformRates(args.t)
+    elif args.distr == "dirichlet":
+        rate_dist = rates.DirichletRates(args.t)
     stats["rate_dist"] = rate_dist.get_stats()
     print(stats)
 

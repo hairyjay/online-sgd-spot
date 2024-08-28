@@ -26,6 +26,22 @@ class UniformRates(object):
                 "min_rate": 1,
                 "max_rate": self.rate * 2}
 
+class DirichletRates(object):
+    def __init__(self, t):
+        self.rate = 1 / t
+        print(self.rate)
+
+    def get_t(self, size):
+        rates = np.random.dirichlet(np.ones(size) * 3.0)
+        rates = rates * size * self.rate
+        print(rates, np.mean(rates))
+        return np.reciprocal(rates), rates
+
+    def get_stats(self):
+        return {"distribution": "dirichlet",
+                "alpha": 3.0,
+                "mean_rate": self.rate}
+
 class BoundedUniformRates(object):
     def __init__(self, t, std):
         self.rate = 1 / t
