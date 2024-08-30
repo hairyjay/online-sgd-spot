@@ -17,7 +17,7 @@ from . import data_tools
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, Net, ts, price_distr, size, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, Net, ts, size, lr=0.005, k=5, t=100, B=256):
         self.params = 0
         self.lr = lr
         self.k = k
@@ -35,7 +35,6 @@ class ParameterServer(object):
         self.arrival_time = []
         self.gradient_time = []
         self.update_time = []
-        self.price_distr = price_distr
         self.running = True
         self.cost_log = []
 
@@ -106,26 +105,15 @@ class ParameterServer(object):
             if self.processed % self.t == 0:
                 print("QUEUE SIZE AT BATCH {} ({}s ELAPSED): {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
                 self.queue_acc(test_server)
+            
+            await asyncio.sleep(0)
 
     def apply_gradients(self, gradients):
-        #print(type(gradients), [type(g) for g in gradients])
-        #print(np.max([np.max([np.max(i) for i in g]) for g in gradients]), np.min([np.min([np.min(i) for i in g]) for g in gradients]))
-        #for g in gradients:
-            #print(len(g), [(type(i), np.size(i)) for i in g])
-            #for i in g:
-                #if np.isnan(i).any():
-                    #print("AAAAAAAAAAAAAAAA NAN NAN NAN NAN NAN NAN NAN")
-                    #print(i)
-        #grad = []
-        #for i in range(len(gradients[0])):
-            #grad.append(np.mean([g[i] for g in gradients]))
-        #grad = np.mean(gradients, axis = 0)
         for i, param in enumerate(self.net.parameters()):
             grad = np.mean([g[i] for g in gradients], axis = 0)
             param.data -= self.lr * torch.from_numpy(grad)
         self.processed += self.k
         del grad
-        #print(self.processed)
 
     def queue_acc(self, test_server):
         weights = []
@@ -135,7 +123,20 @@ class ParameterServer(object):
         test_server.test_acc.remote(weights, self.processed)
         del weights
 
-    async def price_producer(self, workers, l, allocation, adaptive=False):
+    def terminate(self):
+        self.queue.put_nowait("stop")
+        self.running = False
+
+##################################################################
+# price server
+##################################################################
+
+@ray.remote(num_cpus=2)
+class PriceServer(object):
+    def __init__(self, price_distr):
+        self.price_distr = price_distr
+
+    async def price_producer(self, workers, start_time, l, allocation, adaptive=False):
         if self.workers is None:
             self.workers = workers
     
@@ -145,6 +146,7 @@ class ParameterServer(object):
         while not self.training:
             await asyncio.sleep(0)
         N = len(self.workers)
+        self.start_time = start_time
 
         #for adaptive method
         self.availability = 1
@@ -174,7 +176,7 @@ class ParameterServer(object):
             if update_time == False:
                 interval = refresh_interval
 
-                self.refresh_workers(allocation, adaptive)
+                self.refresh_workers(allocation, adaptive, time.time() - last_update)
             else:
                 if update_time < next_interval:
                     interval = update_time
@@ -193,7 +195,7 @@ class ParameterServer(object):
                     next_interval = refresh_interval
                     update_time -= interval
 
-                    self.refresh_workers(allocation, adaptive)
+                    self.refresh_workers(allocation, adaptive, time.time() - last_update)
 
 
             await asyncio.sleep(interval)
@@ -220,11 +222,11 @@ class ParameterServer(object):
 
         return 'price', np.array(self.cost_log)
 
-    def refresh_workers(self, allocation, adaptive):
+    def refresh_workers(self, allocation, adaptive, interval):
         
         switch = allocation.preempt(self.spot_state)
-        #if adaptive:
-            #self.adap_allocate(allocation)
+        if adaptive:
+            self.adap_allocate(allocation)
 
         self.spot_state = np.logical_xor(self.spot_state, switch).astype(float)
         for i in range(len(self.workers)):
@@ -235,7 +237,7 @@ class ParameterServer(object):
         new_ns = np.sum(self.persistence)
         new_running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
         if self.ns != new_ns or self.running != new_running:
-            print("NS = {}, number running = {}".format(new_ns, new_running))
+            print("NS = {}, number running = {}, since last refresh = {}".format(new_ns, new_running, interval))
             self.ns = new_ns
             self.running = new_running
 
@@ -248,7 +250,6 @@ class ParameterServer(object):
         self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=a)
 
     def terminate(self):
-        self.queue.put_nowait("stop")
         self.running = False
 
 ##################################################################
@@ -487,11 +488,11 @@ class Coordinator(object):
         self.ts = TestServer.remote(self.Net)
         self.ps = ParameterServer.remote(self.Net,
                                          self.ts,
-                                         pricing,
                                          self.args.size,
                                          k=self.args.K,
                                          t=self.args.test,
                                          B=self.args.bs)
+        self.pr = PriceServer.remote(pricing)
         self.workers = []
         for i in range(self.args.size):
             self.workers.append(Worker.remote(i,

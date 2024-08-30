@@ -81,7 +81,6 @@ class InstanceAllocation(object):
             #FIXED RATE
             NS = np.floor((self.N - (J * self.b) / (l * t)) / (1 - a)).astype(int)
             NS = min(NS, self.N)
-            print(NS)
             spot[:NS] = 1
 
         elif isinstance(l, np.ndarray):
@@ -105,7 +104,7 @@ class InstanceAllocation(object):
                     cost = new_cost
 
             spot = np.zeros(self.N)
-            print(len(spot_indices))
+            #print(len(spot_indices))
             spot[spot_indices] = 1
 
         else:

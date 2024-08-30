@@ -40,7 +40,7 @@ class Shards(actors.Coordinator):
             t, l = rate_dist.get_t(self.args.size)
 
         self.processes.append(self.ps.queue_consumer.remote(self.workers, self.ts, start_time))
-        self.processes.append(self.ps.price_producer.remote(self.workers, l, allocation, self.args.adap))
+        self.processes.append(self.pr.price_producer.remote(self.workers, start_time, l, allocation, self.args.adap))
         self.processes.append(self.ts.valid_consumer.remote(self.get_testset,
                                                             self.get_test_augment,
                                                             start_time,
