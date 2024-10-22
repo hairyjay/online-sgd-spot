@@ -17,7 +17,7 @@ from . import data_tools
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, Net, ts, size, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, Net, ts, pr, size, lr=0.005, k=5, t=100, B=256):
         self.params = 0
         self.lr = lr
         self.k = k
@@ -26,6 +26,7 @@ class ParameterServer(object):
         self.queue = asyncio.Queue()
         self.processed = 0
         self.ts = ts
+        self.pr = pr
         self.workers = None
         self.start_time = None
         self.training = False
@@ -36,7 +37,6 @@ class ParameterServer(object):
         self.gradient_time = []
         self.update_time = []
         self.running = True
-        self.cost_log = []
 
         self.arrival_count = None
 
@@ -60,7 +60,7 @@ class ParameterServer(object):
         #print(itr)
         return True
 
-    async def queue_consumer(self, workers, test_server, start_time):
+    async def queue_consumer(self, workers, start_time):
         if self.workers is None:
             self.workers = workers
         self.start_time = start_time
@@ -101,10 +101,11 @@ class ParameterServer(object):
             self.arrival_time.append([self.processed, group_start - self.start_time])
             self.gradient_time.append([self.processed, time.time() - group_start])
             self.update_time.append([self.processed, time.time() - self.start_time])
+            self.pr.count_signal.remote(self.arrival_count, self.processed, group_start - self.start_time)
 
             if self.processed % self.t == 0:
                 print("QUEUE SIZE AT BATCH {} ({}s ELAPSED): {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
-                self.queue_acc(test_server)
+                self.queue_acc()
             
             await asyncio.sleep(0)
 
@@ -115,12 +116,12 @@ class ParameterServer(object):
         self.processed += self.k
         del grad
 
-    def queue_acc(self, test_server):
+    def queue_acc(self):
         weights = []
         for param in self.net.parameters():
             weights.append(param.data)
 
-        test_server.test_acc.remote(weights, self.processed)
+        self.ts.test_acc.remote(weights, self.processed)
         del weights
 
     def terminate(self):
@@ -135,16 +136,27 @@ class ParameterServer(object):
 class PriceServer(object):
     def __init__(self, price_distr):
         self.price_distr = price_distr
+        self.workers = None
+        self.start_time = None
+        self.cost_log = []
+        self.arrival_count = None
+        self.processed = 0
+        self.ps_time = 1
+
+    def count_signal(self, arrival_count, processed, time):
+        self.arrival_count = arrival_count
+        self.processed = processed
+        self.ps_time = time
+        return True
 
     async def price_producer(self, workers, start_time, l, allocation, adaptive=False):
         if self.workers is None:
             self.workers = workers
+        self.arrival_count = np.zeros(len(self.workers))
     
         self.p_spot, update_time = self.price_distr.get_price()
         self.p_on_demand = self.price_distr.get_on_demand()
-
-        while not self.training:
-            await asyncio.sleep(0)
+    
         N = len(self.workers)
         self.start_time = start_time
 
@@ -168,6 +180,7 @@ class PriceServer(object):
 
         refresh_interval = 2
         next_interval = refresh_interval
+        last_refresh = time.time()
 
         total_cost = 0
 
@@ -176,7 +189,7 @@ class PriceServer(object):
             if update_time == False:
                 interval = refresh_interval
 
-                self.refresh_workers(allocation, adaptive, time.time() - last_update)
+                self.refresh_workers(allocation, adaptive, last_refresh)
             else:
                 if update_time < next_interval:
                     interval = update_time
@@ -195,8 +208,9 @@ class PriceServer(object):
                     next_interval = refresh_interval
                     update_time -= interval
 
-                    self.refresh_workers(allocation, adaptive, time.time() - last_update)
+                    self.refresh_workers(allocation, adaptive, last_refresh)
 
+            last_refresh = time.time()
 
             await asyncio.sleep(interval)
 
@@ -214,6 +228,12 @@ class PriceServer(object):
                 else:
                     self.spot_time += real_interval
 
+            # PRICE LOG OUTPUT
+            #   0: TIMESTAMP AT UPDATE TIME
+            #   1: SPOT PRICE
+            #   2: NUMBER OF SPOT INSTANCES
+            #   3: NUMBER OF ONLINE INSTANCES
+            #   4: REAL RECORDED COST
             self.cost_log.append([  last_update - self.start_time,
                                     self.p_spot,
                                     np.sum(self.persistence),
@@ -237,17 +257,16 @@ class PriceServer(object):
         new_ns = np.sum(self.persistence)
         new_running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
         if self.ns != new_ns or self.running != new_running:
-            print("NS = {}, number running = {}, since last refresh = {}".format(new_ns, new_running, interval))
+            print("NS = {}, number running = {}, since last refresh = {}".format(new_ns, new_running, time.time() - interval))
             self.ns = new_ns
             self.running = new_running
 
     def adap_allocate(self, allocation):
-        elapsed = time.time() - self.start_time
         l_adap = self.arrival_count / self.on_time
         l_adap[l_adap < 1] = 1
         #print(np.mean(l_adap), self.processed, elapsed, self.availability/self.spot_time)
         a = self.availability/float(self.spot_time)
-        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=elapsed, a=a)
+        self.persistence = allocation.allocate(l_adap, self.p_spot, self.p_on_demand, arrived=self.processed, elapsed=self.ps_time, a=a)
 
     def terminate(self):
         self.running = False
@@ -279,7 +298,7 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=200000, target_acc=None, autoexit=False):
+    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False):
         testset = get_testset(self.device.type)
         self.augment = get_augment()
         torch.set_num_threads(4)
@@ -486,13 +505,14 @@ class Coordinator(object):
     def __init__(self, args, pricing):
         self.args = args
         self.ts = TestServer.remote(self.Net)
+        self.pr = PriceServer.remote(pricing)
         self.ps = ParameterServer.remote(self.Net,
                                          self.ts,
+                                         self.pr,
                                          self.args.size,
                                          k=self.args.K,
                                          t=self.args.test,
                                          B=self.args.bs)
-        self.pr = PriceServer.remote(pricing)
         self.workers = []
         for i in range(self.args.size):
             self.workers.append(Worker.remote(i,
@@ -513,6 +533,7 @@ class Coordinator(object):
         for w in self.workers:
             w.terminate.remote()
         self.ps.terminate.remote()
+        self.pr.terminate.remote()
         return ray.get(self.ts.terminate.remote())
 
     def save_logs(self):
