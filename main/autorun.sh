@@ -8,10 +8,10 @@
 set -e
 i=0
 
-while [ $(ls -l ./runs/ | grep -c ^d) -lt 16 ]
+while [ $(ls -l ./runs/ | grep -c ^d) -lt 8 ]
 do
   echo "RUN $i START"
-  python -m main.preempt --size=64 --K=20 --bs=256 --t=0.004 --d=4400 --J=250000 --a=0.8 --distr=dirichlet -e
+  python -m main.preempt --size=64 --K=20 --bs=256 --t=0.004 --d=4400 --J=250000 --a=0.8 --distr=uniform -e -d --time-scale=1.5
   echo "RUN $i END"
   i=$[$i+1]
 done

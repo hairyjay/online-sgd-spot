@@ -17,7 +17,7 @@ from . import data_tools
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, Net, ts, pr, size, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
         self.params = 0
         self.lr = lr
         self.k = k
@@ -37,6 +37,7 @@ class ParameterServer(object):
         self.gradient_time = []
         self.update_time = []
         self.running = True
+        self.time_scale = time_scale
 
         self.arrival_count = None
 
@@ -78,9 +79,9 @@ class ParameterServer(object):
             for i in range(self.k):
                 b = await self.queue.get()
                 if b == "stop":
-                    arrival_time = np.array(self.arrival_time)
-                    gradient_time = np.array(self.gradient_time)
-                    update_time = np.array(self.update_time)
+                    arrival_time = np.array(self.arrival_time) / self.time_scale
+                    gradient_time = np.array(self.gradient_time) / self.time_scale
+                    update_time = np.array(self.update_time) / self.time_scale
                     return 'ps', arrival_time, gradient_time, update_time
                 batches.append(b)
                 self.arrival_count[b[0]] += self.b
@@ -134,7 +135,7 @@ class ParameterServer(object):
 
 @ray.remote(num_cpus=2)
 class PriceServer(object):
-    def __init__(self, price_distr):
+    def __init__(self, price_distr, time_scale):
         self.price_distr = price_distr
         self.workers = None
         self.start_time = None
@@ -142,6 +143,7 @@ class PriceServer(object):
         self.arrival_count = None
         self.processed = 0
         self.ps_time = 1
+        self.time_scale = time_scale
 
     def count_signal(self, arrival_count, processed, time):
         self.arrival_count = arrival_count
@@ -178,7 +180,7 @@ class PriceServer(object):
         last_update = time.time()
         print("starting spot price set to {}".format(self.p_spot))
 
-        refresh_interval = 2
+        refresh_interval = 2 * self.time_scale
         next_interval = refresh_interval
         last_refresh = time.time()
 
@@ -234,7 +236,7 @@ class PriceServer(object):
             #   2: NUMBER OF SPOT INSTANCES
             #   3: NUMBER OF ONLINE INSTANCES
             #   4: REAL RECORDED COST
-            self.cost_log.append([  last_update - self.start_time,
+            self.cost_log.append([  (last_update - self.start_time) / self.time_scale,
                                     self.p_spot,
                                     np.sum(self.persistence),
                                     np.sum(np.logical_or((1 - self.persistence), self.spot_state)),
@@ -257,7 +259,7 @@ class PriceServer(object):
         new_ns = np.sum(self.persistence)
         new_running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
         if self.ns != new_ns or self.running != new_running:
-            print("NS = {}, number running = {}, since last refresh = {}".format(new_ns, new_running, time.time() - interval))
+            print("NS = {}, number running = {}, since last refresh = {}, p_spot = {}, p_od = {}".format(new_ns, new_running, time.time() - interval, self.p_spot, self.p_on_demand))
             self.ns = new_ns
             self.running = new_running
 
@@ -370,7 +372,7 @@ class TestServer(object):
 
 @ray.remote(num_cpus=2)
 class Worker(object):
-    def __init__(self, worker_index, ps, Net, B=32, lr=0.03, opt='sgd'):
+    def __init__(self, worker_index, ps, Net, time_scale, B=32, lr=0.03, opt='sgd'):
         self.worker_index = worker_index
         self.ps = ps
         self.curritr = 0
@@ -386,6 +388,7 @@ class Worker(object):
         self.preempt = False
         self.arrival_time = []
         self.gradient_time = []
+        self.time_scale = time_scale
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net = Net().to(self.device)
         if opt == 'adam':
@@ -441,8 +444,8 @@ class Worker(object):
         while True:
             signal = await self.queue.get()
             if signal == "stop":
-                arrival_time = np.array(self.arrival_time)
-                gradient_time = np.array(self.gradient_time)
+                arrival_time = np.array(self.arrival_time) / self.time_scale
+                gradient_time = np.array(self.gradient_time) / self.time_scale
                 return str(self.worker_index), arrival_time, gradient_time
             self.queue.task_done()
             #print(self.curritr, self.preempt)
@@ -505,11 +508,12 @@ class Coordinator(object):
     def __init__(self, args, pricing):
         self.args = args
         self.ts = TestServer.remote(self.Net)
-        self.pr = PriceServer.remote(pricing)
+        self.pr = PriceServer.remote(pricing, self.args.time_scale)
         self.ps = ParameterServer.remote(self.Net,
                                          self.ts,
                                          self.pr,
                                          self.args.size,
+                                         self.args.time_scale,
                                          k=self.args.K,
                                          t=self.args.test,
                                          B=self.args.bs)
@@ -518,6 +522,7 @@ class Coordinator(object):
             self.workers.append(Worker.remote(i,
                                               self.ps,
                                               self.Net,
+                                              self.args.time_scale,
                                               B=self.args.bs,
                                               lr=self.args.lr,
                                               opt=self.args.optimizer))

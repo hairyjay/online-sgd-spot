@@ -26,6 +26,7 @@ parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 #parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
 parser.add_argument('--t', default=0.008, type=float, help='mean inter-arrival time of an individual data point')
+parser.add_argument('--time-scale', default=1, type=float, help='time scaling factor')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0, type=float, help='target accuracy')
@@ -39,6 +40,10 @@ parser.add_argument('--autoexit', '-e', action='store_true', help='whether to ex
 parser.add_argument('--distr', default='fixed', help='arrival rate distribution')
 parser.add_argument('--optimizer', default='sgd', help='optimizer')
 parser.add_argument('--dataset', default='a-emnist', help='experiment dataset')
+parser.add_argument('--drift', '-c', action='store_true', help='context drift mode')
+parser.add_argument('--drift-start', default=3300, type=int, help='start time for context drift')
+parser.add_argument('--drift-time', default=400, type=int, help='duration of gradual context drift')
+parser.add_argument('--drift-cats', default=10, type=int, help='number of categories withheld for drift')
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -60,11 +65,11 @@ if __name__ == "__main__":
 
     # DATA RATES
     if args.distr == "fixed":
-        rate_dist = rates.FixedRates(args.t)
+        rate_dist = rates.FixedRates(args.t, args.time_scale)
     elif args.distr == "uniform":
-        rate_dist = rates.UniformRates(args.t)
+        rate_dist = rates.UniformRates(args.t, args.time_scale)
     elif args.distr == "dirichlet":
-        rate_dist = rates.DirichletRates(args.t)
+        rate_dist = rates.DirichletRates(args.t, args.time_scale)
     stats["rate_dist"] = rate_dist.get_stats()
     print(stats)
 

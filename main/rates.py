@@ -2,45 +2,51 @@ import numpy as np
 import numpy.random as random
 
 class FixedRates(object):
-    def __init__(self, t):
+    def __init__(self, t, scaling):
         self.t = t
+        self.scaling = scaling
 
     def get_t(self, size):
-        return np.ones(size) * self.t, 1 / self.t
+        return np.ones(size) * self.t * self.scaling, 1 / self.t
 
     def get_stats(self):
         return {"distribution": "fixed",
-                "t": self.t}
+                "t": self.t,
+                "scale": self.scaling}
 
 class UniformRates(object):
-    def __init__(self, t):
+    def __init__(self, t, scaling):
         self.rate = 1 / t
+        self.scaling = scaling
         print(self.rate)
 
     def get_t(self, size):
         rates = np.random.uniform(1, self.rate * 2, size=size)
-        return np.reciprocal(rates), rates
+        return np.reciprocal(rates) * self.scaling, rates
 
     def get_stats(self):
         return {"distribution": "uniform",
                 "min_rate": 1,
-                "max_rate": self.rate * 2}
+                "max_rate": self.rate * 2,
+                "scale": self.scaling}
 
 class DirichletRates(object):
-    def __init__(self, t):
+    def __init__(self, t, scaling):
         self.rate = 1 / t
+        self.scaling = scaling
         print(self.rate)
 
     def get_t(self, size):
         rates = np.random.dirichlet(np.ones(size) * 3.0)
         rates = rates * size * self.rate
         print(rates, np.mean(rates))
-        return np.reciprocal(rates), rates
+        return np.reciprocal(rates) * self.scaling, rates
 
     def get_stats(self):
         return {"distribution": "dirichlet",
                 "alpha": 3.0,
-                "mean_rate": self.rate}
+                "mean_rate": self.rate,
+                "scale": self.scaling}
 
 class BoundedUniformRates(object):
     def __init__(self, t, std):

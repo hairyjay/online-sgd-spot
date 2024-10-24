@@ -54,7 +54,7 @@ class InstanceAllocation(object):
         self.J = args.J
         self.b = args.bs
         self.N = args.size
-        self.t = args.d
+        self.t = args.d * args.time_scale
         self.a = args.a
         self.cycles = cycles
         if self.a >= 1.0:
@@ -86,6 +86,7 @@ class InstanceAllocation(object):
         elif isinstance(l, np.ndarray):
             #VARIABLE RATE
             l_arg = np.argsort(l)
+            print(arrived/elapsed, np.sum(l), (J * self.b / t))
             threshold = (np.sum(l) - (J * self.b / t)) / (1 - a)
             cost = np.inf
             rate_sum = 0
@@ -93,6 +94,7 @@ class InstanceAllocation(object):
             for ns, idx in enumerate(l_arg):
                 new_cost = self.compute_cost(l, ns, rate_sum, p_spot, p_on_demand, J, a)
                 rate_sum += l[idx]
+                #print(ns, cost, new_cost, rate_sum, threshold)
                 #if new_cost > cost:
                     #print("local min found")
                 #if rate_sum > threshold:
