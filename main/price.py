@@ -86,7 +86,7 @@ class InstanceAllocation(object):
         elif isinstance(l, np.ndarray):
             #VARIABLE RATE
             l_arg = np.argsort(l)
-            print(arrived/elapsed, np.sum(l), (J * self.b / t))
+            #print(arrived/elapsed, np.sum(l), (J * self.b / t))
             threshold = (np.sum(l) - (J * self.b / t)) / (1 - a)
             cost = np.inf
             rate_sum = 0

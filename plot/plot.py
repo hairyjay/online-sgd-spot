@@ -63,8 +63,11 @@ def get_traces(struct, path, deadline, availability, rate, adap, color, sm_marke
                 acc_time = np.zeros((acc.shape[0], 5))
                 acc_time[:, :acc.shape[1]] = acc
                 times = get_batch_times(run)
+                if "scale" in file["rate_dist"]:
+                    times = times * file["rate_dist"]["scale"]
                 for t in range(acc_time.shape[0]):
-                    acc_time[t, 3] = times[np.where(times[:, 0] == acc_time[t, 0]) , 1]
+                    if acc_time[t, 0] < times[-1, 0]:
+                        acc_time[t, 3] = times[np.where(times[:, 0] == acc_time[t, 0]) , 1]
 
                 price = get_price_trace(run)
                 #print(path)
@@ -136,34 +139,27 @@ def get_data():
 
     rate = 'fixed'
     get_traces(struct, 'ondemand_{}'.format(rate), 1, 1, rate, False, 'darkorange', 'x', 'X', label='on demand')
-    get_traces(struct, '105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'blue', '.', 'o')
-    get_traces(struct, '105_80_{}'.format(rate), 1.05, 0.8, rate, False, 'green', '+', 'P')
-    get_traces(struct, '110_80_{}'.format(rate), 1.1, 0.8, rate, False, 'magenta', '1', 'v')
 
-    get_traces(struct, 'adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'cyan', '.', 'o')
-    get_traces(struct, 'adap_105_80_{}'.format(rate), 1.05, 0.8, rate, True, 'yellow', '+', 'P')
-    get_traces(struct, 'adap_110_80_{}'.format(rate), 1.1, 0.8, rate, True, 'red', '1', 'v')
+    for rate in ['fixed', 'dirichlet', 'uniform']:
+        get_traces(struct, '105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'blue', '.', 'o')
+        get_traces(struct, '105_80_{}'.format(rate), 1.05, 0.8, rate, False, 'green', '+', 'P')
+        get_traces(struct, '110_80_{}'.format(rate), 1.1, 0.8, rate, False, 'magenta', '1', 'v')
 
-    #get_traces(struct, 'ondemand_{}'.format(rate), 1, 1, rate, False, 'brown', '.', 'o', od_price=0.186, name='lower_ondemand_{}'.format(rate), label='on demand')
-    #get_traces(struct, 'lower_105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'black', '.', 'o', od_price=0.186)
-    #get_traces(struct, 'lower_adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'grey', '.', 'o', od_price=0.186)
+        get_traces(struct, 'adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'cyan', '.', 'o')
+        get_traces(struct, 'adap_105_80_{}'.format(rate), 1.05, 0.8, rate, True, 'yellow', '+', 'P')
+        get_traces(struct, 'adap_110_80_{}'.format(rate), 1.1, 0.8, rate, True, 'red', '1', 'v')
 
-    rate = 'dirichlet'
-    #get_traces(struct, 'ondemand_{}'.format(rate), 1, 1, rate, False, 'darkorange', 'x', 'X', label='on demand')
-    get_traces(struct, '105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'blue', '.', 'o')
-    get_traces(struct, '105_80_{}'.format(rate), 1.05, 0.8, rate, False, 'green', '+', 'P')
-    get_traces(struct, '110_80_{}'.format(rate), 1.1, 0.8, rate, False, 'magenta', '1', 'v')
+        #get_traces(struct, 'ondemand_{}'.format(rate), 1, 1, rate, False, 'brown', '.', 'o', od_price=0.186, name='lower_ondemand_{}'.format(rate), label='on demand')
+        #get_traces(struct, 'lower_105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'black', '.', 'o', od_price=0.186)
+        #get_traces(struct, 'lower_adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'grey', '.', 'o', od_price=0.186)
 
-    get_traces(struct, 'adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'cyan', '.', 'o')
-    get_traces(struct, 'adap_105_80_{}'.format(rate), 1.05, 0.8, rate, True, 'yellow', '+', 'P')
-    get_traces(struct, 'adap_110_80_{}'.format(rate), 1.1, 0.8, rate, True, 'red', '1', 'v')
-
-    print(struct)
+    #print(struct)
     return struct
 
 def plot_cost(data, rate, ymin=18, ymax=40, xmin=5500, xmax=7500, adap=False, legend=True, width=3, height=2):
     def plot_cat(name):
         for a, thr in zip(data[name]['traces'], data[name]['thresholds']):
+            #print(name, a[np.where(a[:, 0] == thr), :])
             plt.plot(   a[np.where(a[:, 0] == thr), 3],
                         a[np.where(a[:, 0] == thr), 4],
                         color=data[name]['color'], alpha=0.3,
@@ -295,6 +291,7 @@ def plot_loss(data):
     plot_line('ondemand_{}'.format(rate), linestyle='solid')
     plot_line('105_80_{}'.format(rate), linestyle='dashed')
     plot_line('110_80_{}'.format(rate), linestyle='dashed')
+    plot_line('adap_110_80_{}'.format(rate), linestyle='dashed')
     plot_line('105_90_{}'.format(rate), linestyle='dashed')
     plt.yscale('log')
     plt.grid(which='both', alpha=0.5)
@@ -336,6 +333,8 @@ def plot_savings(data):
     plt.show()
 
 data = get_data()
+print(data["ondemand_fixed"]["mean_time"])
+print(np.mean(data["ondemand_fixed"]["thresholds"]))
 
 #print(100 * data['105_90_uniform']['mean_price'] / data['ondemand_uniform']['mean_price'])
 #print(100 * data['105_80_uniform']['mean_price'] / data['ondemand_uniform']['mean_price'])
@@ -350,7 +349,7 @@ data = get_data()
 #plot_acc(data)
 
 #plot_cost(data, 'fixed', legend=False)
-#plot_cost(data, 'dirichlet', width=5)
-plot_cost(data, 'fixed', adap=True)
-plot_cost(data, 'dirichlet', adap=True)
+#plot_cost(data, 'dirichlet', adap=True)
+#plot_cost(data, 'fixed', adap=True)
+plot_cost(data, 'uniform', adap=True)
 #plot_cost(data, 'uniform', ymin=10, ymax=50, adap=True)

@@ -37,7 +37,7 @@ class DirichletRates(object):
         print(self.rate)
 
     def get_t(self, size):
-        rates = np.random.dirichlet(np.ones(size) * 3.0)
+        rates = np.random.dirichlet(np.ones(size) * 5.0)
         rates = rates * size * self.rate
         print(rates, np.mean(rates))
         return np.reciprocal(rates) * self.scaling, rates

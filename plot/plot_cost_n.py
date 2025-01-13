@@ -30,14 +30,15 @@ ax = plt.gca()
 ax1 = plt.subplot(1, 2, 1)
 ax2 = plt.subplot(1, 2, 2)
 i = 0
-for run in os.scandir(os.path.join('../', 'runs')):
+for run in os.scandir(os.path.join('../', 'runs', 'a-emnist', 'adap_105_80_dirichlet')):
+    print(run)
     if os.path.isdir(run):
         if os.path.exists(os.path.join(run, "stats.json")):
-
             with open(os.path.join(run, "stats.json")) as json_file:
                 data = json.load(json_file)
                 pricing = data["pricing"]
-
+                print(pricing)
+            
                 if pricing is None:
                     preempt_type = data["preempt"]["distribution"]
                     if preempt_type == type:
@@ -95,7 +96,7 @@ print(labels)
 #s_labels = [labels[3], labels[1], labels[4], labels[0], labels[2]]
 #s_handles = [handles[3], handles[1], handles[4], handles[0], handles[2]]
 #UNIF
-s_labels = [labels[2], labels[0], labels[3], labels[4], labels[1]]
-s_handles = [handles[2], handles[0], handles[3], handles[4], handles[1]]
-ax1.legend(s_handles, s_labels)
+#s_labels = [labels[2], labels[0], labels[3], labels[4], labels[1]]
+#s_handles = [handles[2], handles[0], handles[3], handles[4], handles[1]]
+#ax1.legend(s_handles, s_labels)
 plt.show()

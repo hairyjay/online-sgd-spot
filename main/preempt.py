@@ -54,9 +54,11 @@ if __name__ == "__main__":
     stats = vars(args)
 
     # PRICING
-    pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
-    #pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
-    #pricing = price.FixedPricing(0.286) # FIXED PRICE
+    if args.a <= 1.0:
+        pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
+        #pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
+    else:
+        pricing = price.FixedPricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
     # ALLOCATION

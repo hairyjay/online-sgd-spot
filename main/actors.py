@@ -105,7 +105,7 @@ class ParameterServer(object):
             self.pr.count_signal.remote(self.arrival_count, self.processed, group_start - self.start_time)
 
             if self.processed % self.t == 0:
-                print("QUEUE SIZE AT BATCH {} ({}s ELAPSED): {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
+                print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
                 self.queue_acc()
             
             await asyncio.sleep(0)
@@ -236,6 +236,7 @@ class PriceServer(object):
             #   2: NUMBER OF SPOT INSTANCES
             #   3: NUMBER OF ONLINE INSTANCES
             #   4: REAL RECORDED COST
+            #print("time: {}, processed: {}, total cost: {}".format((last_update - self.start_time) / self.time_scale, self.processed, total_cost))
             self.cost_log.append([  (last_update - self.start_time) / self.time_scale,
                                     self.p_spot,
                                     np.sum(self.persistence),
@@ -328,7 +329,7 @@ class TestServer(object):
 
             self.processed = itr
             acc, loss = self.get_acc(test_loader)
-            print("ACCURACY AFTER {} BATCHES: {}; LOSS: {}".format(self.processed, acc, loss))
+            print("AFTER {} BATCHES: {:.2f}% ACC; {:.0f} LOSS".format(self.processed, acc, loss))
             accuracy.append([self.processed, acc, loss])
 
             if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):

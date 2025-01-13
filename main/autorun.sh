@@ -11,10 +11,12 @@ i=0
 while [ $(ls -l ./runs/ | grep -c ^d) -lt 8 ]
 do
   echo "RUN $i START"
-  python -m main.preempt --size=64 --K=20 --bs=256 --t=0.004 --d=4400 --J=250000 --a=0.8 --distr=uniform -e -d --time-scale=1.5
+  python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=8400 --J=250000 --a=0.9 --distr=uniform -e -d
   echo "RUN $i END"
   i=$[$i+1]
 done
+
+#python -m main.preempt --size=64 --K=40 --bs=128 --t=0.004 --d=4400 --J=250000 --a=0.8 --distr=dirichlet -e -d
 
 #OLD LINES
   #python -m main.preempt --size=64 --K=20 --bs=256 --d=6264 --a=1 -e -f --optimizer=adam #EMNIST ADAM ONDEMAND
