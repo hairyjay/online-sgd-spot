@@ -13,6 +13,9 @@ For experiments in [1, 2], the environment is on clusters directly launched by R
 For the paper data in [3], the experiment environment for DOLL is hosted on Kubernetes clusters through [KubeRay](https://docs.ray.io/en/latest/cluster/kubernetes/index.html). For cost saving purposes, experiments are run on Amazon EKS clusters with spot instances for workers. The workers for the cluster can be set up through [this guide](https://docs.ray.io/en/latest/cluster/kubernetes/user-guides/aws-eks-gpu-cluster.html#kuberay-eks-gpu-cluster-setup).
 
 0. For the Kubernetes setting, nodes must be set up and managed separately. [Helm](https://helm.sh/) must be installed to install packages on the cluster.
+    - ps: c7i.xlarge
+    - ts: g4dn.xlarge
+    - workers: m4.large
 
 1. Connect to the EKS clusters (Step 2), i.e.
     ```

@@ -94,7 +94,7 @@ spec:
               memory: "24G"
               nvidia.com/gpu: "1"
             requests:
-              cpu: "3500m"
+              cpu: "1800m"
               memory: "14G"
               nvidia.com/gpu: "1"
   - groupName: doll-ts

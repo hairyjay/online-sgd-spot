@@ -47,8 +47,8 @@ spec:
               cpu: "4"
               memory: "24G"
             requests:
-              cpu: "3400m"
-              memory: "5.5G"
+              cpu: "3000m"
+              memory: "6G"
 
   workerGroupSpecs:
   # the pod replicas in this group typed worker
