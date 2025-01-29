@@ -21,6 +21,7 @@ RAY_IGNORE_UNHANDLED_ERRORS=1
 ray.init(address="auto")
 
 parser = argparse.ArgumentParser(description='PyTorch K-sync SGD')
+subparsers = parser.add_subparsers()
 parser.add_argument('--name','-n', default=None, type=str, help='experiment name, used for saving results')
 parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 #parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -40,10 +41,10 @@ parser.add_argument('--autoexit', '-e', action='store_true', help='whether to ex
 parser.add_argument('--distr', default='fixed', help='arrival rate distribution')
 parser.add_argument('--optimizer', default='sgd', help='optimizer')
 parser.add_argument('--dataset', default='a-emnist', help='experiment dataset')
-parser.add_argument('--drift', '-c', action='store_true', help='context drift mode')
-parser.add_argument('--drift-start', default=3300, type=int, help='start time for context drift')
-parser.add_argument('--drift-time', default=400, type=int, help='duration of gradual context drift')
-parser.add_argument('--drift-cats', default=10, type=int, help='number of categories withheld for drift')
+parser_d = subparsers.add_parser('d')
+parser_d.add_argument('--drift-start', default=3300, type=int, help='start time for context drift')
+parser_d.add_argument('--drift-time', default=400, type=int, help='duration of gradual context drift')
+parser_d.add_argument('--drift-cats', default=20, type=int, help='number of categories withheld for drift')
 args = parser.parse_args()
 
 if __name__ == "__main__":
@@ -73,6 +74,15 @@ if __name__ == "__main__":
     elif args.distr == "dirichlet":
         rate_dist = rates.DirichletRates(args.t, args.time_scale)
     stats["rate_dist"] = rate_dist.get_stats()
+
+    # DRIFT PARAMETERS
+    drift = {}
+    if hasattr(args, "drift_start"):
+        drift["start"] = args.drift_start
+        drift["time"] = args.drift_time
+        drift["cats"] = args.drift_cats
+    args['drift'] = drift
+    print(args)
     print(stats)
 
     # INITIALIZE WORKERS AND PARAMETER SERVER
@@ -122,3 +132,4 @@ if __name__ == "__main__":
     with open(os.path.join(path, "stats.json"), 'w') as f:
         json.dump(stats, f)
     print("run {} terminated".format(args.name))
+ 

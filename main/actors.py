@@ -414,6 +414,7 @@ class Worker(object):
         trainset = get_trainset(self.worker_index)
         self.augment = get_augment()
         i = 0
+        # ADD SAMPLER HERE
         self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
         self.iterator = iter(self.train_loader)
 
