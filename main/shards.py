@@ -1,12 +1,27 @@
-import numpy.random as random
-import torch
+import numpy as np
 import ray
 
 from . import actors
 
 class Shards(actors.Coordinator):
-    def __init__(self, args, pricing):
-        super().__init__(args, pricing)
+    def __init__(self, args, pricing, drift, classes=0):
+        self.drift_mask = (np.empty(shape=0), np.empty(shape=0), None)
+        if drift:
+            if drift["cats"]*2 >= classes:
+                raise ValueError("Withheld classes for drift may not exceed half of total classes")
+            self.drift_classes = np.random.choice(classes, size=drift["cats"]*2, replace=False)
+            self.drift_map = np.zeros(classes, dtype=np.int32)
+            self.drift_map -= 1
+            self.drift_map[self.drift_classes[:drift["cats"]]] = np.arange(drift["cats"])
+            self.drift_map[self.drift_classes[drift["cats"]:]] = np.arange(drift["cats"])
+            i = drift["cats"]
+            for n in range(len(self.drift_map)):
+                if self.drift_map[n] == -1:
+                    self.drift_map[n] = i
+                    i += 1
+            self.drift_mask = (self.drift_classes, self.drift_map, classes - drift["cats"])
+            self.classes = classes - drift["cats"]
+        super().__init__(args, pricing, drift)
 
     def testset(self):
         pass
@@ -46,10 +61,16 @@ class Shards(actors.Coordinator):
                                                             start_time,
                                                             expected_itr=self.args.J,
                                                             target_acc=self.args.target,
-                                                            autoexit=self.args.autoexit))
+                                                            autoexit=self.args.autoexit,
+                                                            mask=self.drift_mask))
+        print("ready to start batch_producer tasks")
 
         for i, w in enumerate(self.workers):
-            self.processes.extend([w.batch_producer.remote(self.get_trainset, self.get_train_augment, t=t[i]), w.batch_consumer.remote(start_time)])
+            self.processes.extend([w.batch_producer.remote(self.get_trainset,
+                                                           self.get_train_augment,
+                                                           t=t[i],
+                                                           mask=self.drift_mask),
+                                   w.batch_consumer.remote(start_time)])
 
     def autoexit(self):
         if self.args.autoexit:
@@ -80,7 +101,7 @@ class DataPartitioner(object):
     def __init__(self, data, sizes=[0.7, 0.2, 0.1], seed=1234, isNonIID=False):
         self.data = data
         self.partitions = []
-        rng = random.default_rng(seed)
+        rng = np.random.default_rng(seed)
         data_len = len(data)
         indexes = [x for x in range(0, data_len)]
         rng.shuffle(indexes)

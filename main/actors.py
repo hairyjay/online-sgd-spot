@@ -9,6 +9,7 @@ import torch.optim as optim
 #import torch.multiprocessing as mp
 
 from . import data_tools
+from . import shards
 #from . import price
 
 ##################################################################
@@ -17,7 +18,7 @@ from . import data_tools
 
 @ray.remote(num_cpus=4)
 class ParameterServer(object):
-    def __init__(self, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, classes, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
         self.params = 0
         self.lr = lr
         self.k = k
@@ -41,7 +42,7 @@ class ParameterServer(object):
 
         self.arrival_count = None
 
-        self.net = Net()
+        self.net = Net(classes)
         print("param server init")
 
     def ready_signal(self, worker_index):
@@ -72,7 +73,7 @@ class ParameterServer(object):
             await asyncio.sleep(0)
         del self.queue
         self.queue = asyncio.Queue()
-        #print("QUEUE START")
+        print("QUEUE START")
 
         while True:
             batches = []
@@ -281,15 +282,22 @@ class PriceServer(object):
 @ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
-    def __init__(self, Net):
+    def __init__(self, Net, classes, drift={}):
         self.processed = 0
         self.weights = {}
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.is_testset_list = False
-        self.net = Net().to(self.device)
+        self.net = Net(classes).to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
+
+        self.drift = drift
+        self.drift_weights = None
+        self.drift_map = np.arange(classes, dtype=np.int32)
+
+        self.sampler = None
+        self.loader_len = 0
         self.training = False
         print("test server init on device {}".format(self.device))
     
@@ -301,7 +309,7 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False):
+    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False, mask=None):
         testset = get_testset(self.device.type)
         self.augment = get_augment()
         torch.set_num_threads(4)
@@ -309,7 +317,25 @@ class TestServer(object):
             batch_size = 128
         else:
             batch_size = 4096
+
         test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+        self.loader_len = len(test_loader)
+        #print(self.loader_len)
+        if self.drift:
+            #self.drift_weights = np.ones(len(mask[1]))
+            self.drift_weights = np.ones(testset.targets.size())
+            self.drift_withdrawn = len(mask[0]) // 2
+            self.drift_mask_p = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
+            self.drift_mask_n = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
+            self.drift_weights[self.drift_mask_n] = 0
+            #print(self.drift_mask, len(self.drift_mask), self.drift_withdrawn, self.drift_weights)
+            #print(testset.targets.size())
+            self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, batch_size)
+            test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, sampler=self.sampler)
+            self.drift_map = torch.from_numpy(mask[1]).long()
+        else:
+            self.drift_map = torch.from_numpy(self.drift_map).long()
+
         accuracy = []
 
         while not self.training:
@@ -322,14 +348,24 @@ class TestServer(object):
             if itr == "stop":
                 break
             test_start = time.time()
-
+            test_time = test_start - start_time
+            print(test_time)
+            if self.drift:
+                if test_time > self.drift["start"]:
+                    if test_time > self.drift["start"] + self.drift["time"]:
+                        self.drift_weights[self.drift_mask_p] = 0
+                        self.drift_weights[self.drift_mask_n] = 1
+                    else:
+                        self.drift_weights[self.drift_mask_p] = 1 - (test_time - self.drift["start"]) / self.drift["time"]
+                        self.drift_weights[self.drift_mask_n] = (test_time - self.drift["start"]) / self.drift["time"]
+                    self.sampler.weights = torch.as_tensor(self.drift_weights)
             for i, param in enumerate(self.net.parameters()):
                 param.data = self.weights[itr][i].to(self.device)
             del self.weights[itr]
 
             self.processed = itr
-            acc, loss = self.get_acc(test_loader)
-            print("AFTER {} BATCHES: {:.2f}% ACC; {:.0f} LOSS".format(self.processed, acc, loss))
+            acc, loss, count = self.get_acc(test_loader)
+            print("AFTER {} BATCHES: {:.2f}% ACC; {:.0f} LOSS; {:.0f} COUNT".format(self.processed, acc, loss, count))
             accuracy.append([self.processed, acc, loss])
 
             if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):
@@ -348,20 +384,41 @@ class TestServer(object):
         return 'ts', np.array(accuracy)
 
     def get_acc(self, test_loader):
-        self.net.eval()
-        top1 = data_tools.AverageMeter()
-        loss = 0
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
+        def compute_acc(inputs, targets, top1):
             inputs = self.augment(inputs.to(self.device))
             targets = targets.to(self.device)
             outputs = self.net(inputs)
             l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
-            loss += l.item()
-            del outputs, l
-            a = time.time()
-        return top1.avg.item(), loss
+            del outputs
+            #a = time.time()
+            return l.item()
+        self.net.eval()
+        top1 = data_tools.AverageMeter()
+        loss = 0
+        if self.drift:
+            count = np.zeros(len(self.drift_map))
+            iterator = iter(test_loader)
+            for i in range(self.loader_len):
+                try:
+                    inputs, targets = next(iterator)
+                except StopIteration:
+                    iterator = iter(test_loader)
+                    inputs, targets = next(iterator)
+                #print(targets)
+                #print(self.drift_mask)
+                u, c = np.unique(targets, return_counts=True)
+                #print(u, c)
+                count[u] += c
+                loss += compute_acc(inputs, self.drift_map[targets], top1)
+            #print(self.drift_weights)
+            #print(self.drift_map)
+            #print(count)
+        else:
+            for i, (inputs, targets) in enumerate(test_loader):
+                loss += compute_acc(inputs, self.drift_map[targets], top1)
+        return top1.avg.item(), loss, top1.count
     
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -373,7 +430,7 @@ class TestServer(object):
 
 @ray.remote(num_cpus=2)
 class Worker(object):
-    def __init__(self, worker_index, ps, Net, time_scale, B=32, lr=0.03, opt='sgd'):
+    def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, lr=0.03, opt='sgd', drift={}):
         self.worker_index = worker_index
         self.ps = ps
         self.curritr = 0
@@ -384,6 +441,11 @@ class Worker(object):
         self.training = False
         self.batch_eps = 0
         self.rng = np.random.default_rng()
+        self.drift = drift
+        self.drift_weights = None
+        self.sampler = None
+        self.drift_mask = None
+        self.drift_map = np.arange(classes, dtype=np.int32)
 
         self.running = True
         self.preempt = False
@@ -391,7 +453,7 @@ class Worker(object):
         self.gradient_time = []
         self.time_scale = time_scale
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.net = Net().to(self.device)
+        self.net = Net(classes).to(self.device)
         if opt == 'adam':
             self.optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08)
         else:
@@ -408,14 +470,34 @@ class Worker(object):
         self.queue.put_nowait(signal)
         return True
 
-    async def batch_producer(self, get_trainset, get_augment, t=0.001):
-        print(self.worker_index, 1/t, t)
+    async def batch_producer(self, get_trainset, get_augment, t=0.001, mask=None):
+        #print(self.worker_index, 1/t, t)
         torch.set_num_threads(4)
         trainset = get_trainset(self.worker_index)
         self.augment = get_augment()
         i = 0
         # ADD SAMPLER HERE
-        self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
+        if self.drift:
+            try:
+                if isinstance(trainset, shards.Partition):
+                    targets = trainset.data.targets[trainset.index]
+                else:
+                    targets = trainset.targets
+                self.drift_weights = np.ones(targets.size())
+                self.drift_withdrawn = len(mask[0]) // 2
+                self.drift_mask_p = np.concatenate([np.argwhere(targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
+                self.drift_mask_n = np.concatenate([np.argwhere(targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
+                self.drift_weights[self.drift_mask_n] = 0
+                self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, self.B)
+                self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, sampler=self.sampler)
+                self.drift_map = torch.from_numpy(mask[1]).long()
+                #print(self.drift_weights.size, self.drift_mask_p.size, self.drift_mask_n.size)
+            except:
+                import traceback
+                traceback.print_exc()
+        else:
+            self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
+            self.drift_map = torch.from_numpy(self.drift_map).long()
         self.iterator = iter(self.train_loader)
 
         self.ps.ready_signal.remote(self.worker_index)
@@ -424,12 +506,24 @@ class Worker(object):
             await asyncio.sleep(0)
 
         start_time = time.time()
-        print("WORKER {}: TRAINING READY AT TIME {}".format(self.worker_index, start_time))
 
         while self.running:
             # SIGNAL QUEUE
             i += 1
             batch_start = time.time()
+            batch_time = batch_start - start_time
+            if self.drift:
+                if batch_time > self.drift["start"]:
+                    if batch_time > self.drift["start"] + self.drift["time"]:
+                        self.drift_weights[self.drift_mask_p] = 0
+                        self.drift_weights[self.drift_mask_n] = 1
+                    else:
+                        self.drift_weights[self.drift_mask_p] = 1 - (batch_time - self.drift["start"]) / self.drift["time"]
+                        self.drift_weights[self.drift_mask_n] = (batch_time - self.drift["start"]) / self.drift["time"]
+                try:
+                    self.sampler.weights = torch.as_tensor(self.drift_weights)
+                except:
+                    print("ya fucked it")
             self.signal(i)
 
             # SIMULATE DATA INTER-ARRIVAL TIME
@@ -470,14 +564,20 @@ class Worker(object):
         except StopIteration:
             self.iterator = iter(self.train_loader)
             data, target = next(self.iterator)
+        #print(self.worker_index, target, self.drift_map)
+        map_target = self.drift_map[target]
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
         self.net.train()
         aug_data = self.augment(data.to(self.device))
         output = self.net(aug_data)
+        #print(self.worker_index, output.shape)
         #if torch.isnan(output).any():
             #print(output, target)
             #print(torch.isnan(data).any())
-        loss = self.criterion(output, target.to(self.device))
+        map_target.to(self.device)
+        #print("target to device")
+        loss = self.criterion(output, map_target)
+        #print(self.worker_index, "loss:", loss.shape)
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -485,7 +585,7 @@ class Worker(object):
         for param in self.net.parameters():
             grads.append(param.grad.data.numpy())
 
-        del self.batches[itr], data, aug_data, target, output, loss
+        del self.batches[itr], data, aug_data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
         return grads
 
@@ -507,11 +607,12 @@ class Coordinator(object):
     class Net():
         pass
 
-    def __init__(self, args, pricing):
+    def __init__(self, args, pricing, drift):
         self.args = args
-        self.ts = TestServer.remote(self.Net)
+        self.ts = TestServer.remote(self.Net, self.classes, drift=drift)
         self.pr = PriceServer.remote(pricing, self.args.time_scale)
-        self.ps = ParameterServer.remote(self.Net,
+        self.ps = ParameterServer.remote(self.classes,
+                                         self.Net,
                                          self.ts,
                                          self.pr,
                                          self.args.size,
@@ -523,11 +624,13 @@ class Coordinator(object):
         for i in range(self.args.size):
             self.workers.append(Worker.remote(i,
                                               self.ps,
+                                              self.classes,
                                               self.Net,
                                               self.args.time_scale,
                                               B=self.args.bs,
                                               lr=self.args.lr,
-                                              opt=self.args.optimizer))
+                                              opt=self.args.optimizer,
+                                              drift=drift))
         self.processes = []
 
     def run(self):

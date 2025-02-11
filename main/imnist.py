@@ -11,12 +11,12 @@ from . import shards
 
 class InfiMNISTShards(shards.Shards):
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self, classes):
             super().__init__()
             self.conv1 = nn.Conv2d(1, 20, 5, 1)
             self.conv2 = nn.Conv2d(20, 50, 5, 1)
             self.fc1 = nn.Linear(4*4*50, 500)
-            self.fc2 = nn.Linear(500, 10)
+            self.fc2 = nn.Linear(500, classes)
 
         def forward(self, x):
             x = F.relu(self.conv1(x))
@@ -28,8 +28,9 @@ class InfiMNISTShards(shards.Shards):
             x = self.fc2(x)
             return F.log_softmax(x, dim=1)
 
-    def __init__(self, args, pricing):
-        super().__init__(args, pricing)
+    def __init__(self, args, pricing, drift):
+        self.classes = 10
+        super().__init__(args, pricing, drift, classes=self.classes)
         if self.args.target == 0:
             self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))

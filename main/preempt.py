@@ -42,8 +42,8 @@ parser.add_argument('--distr', default='fixed', help='arrival rate distribution'
 parser.add_argument('--optimizer', default='sgd', help='optimizer')
 parser.add_argument('--dataset', default='a-emnist', help='experiment dataset')
 parser_d = subparsers.add_parser('d')
-parser_d.add_argument('--drift-start', default=3300, type=int, help='start time for context drift')
-parser_d.add_argument('--drift-time', default=400, type=int, help='duration of gradual context drift')
+parser_d.add_argument('--drift-start', default=300, type=int, help='start time for context drift')
+parser_d.add_argument('--drift-time', default=0, type=int, help='duration of gradual context drift')
 parser_d.add_argument('--drift-cats', default=20, type=int, help='number of categories withheld for drift')
 args = parser.parse_args()
 
@@ -81,17 +81,14 @@ if __name__ == "__main__":
         drift["start"] = args.drift_start
         drift["time"] = args.drift_time
         drift["cats"] = args.drift_cats
-    args['drift'] = drift
-    print(args)
-    print(stats)
 
     # INITIALIZE WORKERS AND PARAMETER SERVER
     if args.dataset == "cifar":
-        experiment = cifar.CIFARShards(args, pricing)
+        experiment = cifar.CIFARShards(args, pricing, drift)
     elif args.dataset == "imnist":
-        experiment = imnist.InfiMNISTShards(args, pricing)
+        experiment = imnist.InfiMNISTShards(args, pricing, drift)
     else:
-        experiment = emnist.EMNISTShards(args, pricing)
+        experiment = emnist.EMNISTShards(args, pricing, drift)
     print("servers launched")
 
     start_time = time.time()

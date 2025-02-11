@@ -11,14 +11,14 @@ from . import shards
 
 class CIFARShards(shards.Shards):
     class Net(nn.Module):
-        def __init__(self):
+        def __init__(self, classes):
             super().__init__()
             self.conv1 = nn.Conv2d(3, 6, 5)
             self.pool = nn.MaxPool2d(2, 2)
             self.conv2 = nn.Conv2d(6, 16, 5)
             self.fc1 = nn.Linear(16 * 5 * 5, 120)
             self.fc2 = nn.Linear(120, 84)
-            self.fc3 = nn.Linear(84, 10)
+            self.fc3 = nn.Linear(84, classes)
 
         def forward(self, x):
             x = self.pool(F.relu(self.conv1(x)))
@@ -29,7 +29,7 @@ class CIFARShards(shards.Shards):
             x = self.fc3(x)
             return x
 
-    def __init__(self, args, pricing):
+    def __init__(self, args, pricing, drift):
         self.train_transform = transforms.Compose([
             transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(),
@@ -40,7 +40,8 @@ class CIFARShards(shards.Shards):
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
-        super().__init__(args, pricing)
+        self.classes = 10
+        super().__init__(args, pricing, drift, classes=self.classes)
         if self.args.target == 0:
             self.args.target = 0.65
             print("DEFAULT -- setting target to {}".format(self.args.target))
