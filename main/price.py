@@ -50,10 +50,11 @@ class FixedPricing(object):
                 "price": self.p}
 
 class InstanceAllocation(object):
-    def __init__(self, args, cycles=500):
+    def __init__(self, args, drift={}, cycles=500):
         self.J = args.J
         self.b = args.bs
         self.N = args.size
+        self.orig_t = args.d * args.time_scale
         self.t = args.d * args.time_scale
         self.a = args.a
         self.cycles = cycles
@@ -63,9 +64,14 @@ class InstanceAllocation(object):
         else:
             self.q_turn_off = 1 / (self.a * cycles)
             self.q_turn_on = 1 / ((1 - self.a) * cycles)
+        self.drift_time = 0
+        if drift:
+            self.drift_time = drift["start"] + drift["time"]
 
     def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
         spot = np.zeros(self.N)
+        if elapsed > self.drift_time:
+            self.t = self.orig_t + self.drift_time
         t = max(self.t - elapsed, 1.0)
         J = max(self.J - arrived, 1)
         if a == None:

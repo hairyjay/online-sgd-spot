@@ -62,8 +62,15 @@ if __name__ == "__main__":
         pricing = price.FixedPricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
 
+    # DRIFT PARAMETERS
+    drift = {}
+    if hasattr(args, "drift_start"):
+        drift["start"] = args.drift_start
+        drift["time"] = args.drift_time
+        drift["cats"] = args.drift_cats
+
     # ALLOCATION
-    allocation = price.InstanceAllocation(args)
+    allocation = price.InstanceAllocation(args, drift=drift)
     stats["allocation"] = allocation.get_stats()
 
     # DATA RATES
@@ -74,13 +81,6 @@ if __name__ == "__main__":
     elif args.distr == "dirichlet":
         rate_dist = rates.DirichletRates(args.t, args.time_scale)
     stats["rate_dist"] = rate_dist.get_stats()
-
-    # DRIFT PARAMETERS
-    drift = {}
-    if hasattr(args, "drift_start"):
-        drift["start"] = args.drift_start
-        drift["time"] = args.drift_time
-        drift["cats"] = args.drift_cats
 
     # INITIALIZE WORKERS AND PARAMETER SERVER
     if args.dataset == "cifar":
