@@ -9,7 +9,11 @@ class Shards(actors.Coordinator):
         if drift:
             if drift["cats"]*2 >= classes:
                 raise ValueError("Withheld classes for drift may not exceed half of total classes")
-            self.drift_classes = np.random.choice(classes, size=drift["cats"]*2, replace=False)
+            if drift["rand"]:
+                self.drift_classes = np.random.choice(classes, size=drift["cats"]*2, replace=False)
+            else:
+                self.drift_classes = np.arange(classes-drift["cats"]*2, classes)
+            print(self.drift_classes)
             self.drift_map = np.zeros(classes, dtype=np.int32)
             self.drift_map -= 1
             self.drift_map[self.drift_classes[:drift["cats"]]] = np.arange(drift["cats"])

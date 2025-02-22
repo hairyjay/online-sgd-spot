@@ -145,9 +145,9 @@ def get_data():
         get_traces(struct, '105_80_{}'.format(rate), 1.05, 0.8, rate, False, 'green', '+', 'P')
         get_traces(struct, '110_80_{}'.format(rate), 1.1, 0.8, rate, False, 'magenta', '1', 'v')
 
-        get_traces(struct, 'adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'cyan', '.', 'o')
-        get_traces(struct, 'adap_105_80_{}'.format(rate), 1.05, 0.8, rate, True, 'yellow', '+', 'P')
-        get_traces(struct, 'adap_110_80_{}'.format(rate), 1.1, 0.8, rate, True, 'red', '1', 'v')
+        get_traces(struct, 'adap_105_90_{}'.format(rate), 1.05, 0.9, rate, True, 'red', '.', 'o')
+        get_traces(struct, 'adap_105_80_{}'.format(rate), 1.05, 0.8, rate, True, 'goldenrod', '+', 'P')
+        get_traces(struct, 'adap_110_80_{}'.format(rate), 1.1, 0.8, rate, True, 'teal', '1', 'v')
 
         #get_traces(struct, 'ondemand_{}'.format(rate), 1, 1, rate, False, 'brown', '.', 'o', od_price=0.186, name='lower_ondemand_{}'.format(rate), label='on demand')
         #get_traces(struct, 'lower_105_90_{}'.format(rate), 1.05, 0.9, rate, False, 'black', '.', 'o', od_price=0.186)
@@ -156,7 +156,7 @@ def get_data():
     #print(struct)
     return struct
 
-def plot_cost(data, rate, ymin=18, ymax=40, xmin=5500, xmax=7500, adap=False, legend=True, width=3, height=2):
+def plot_cost(data, rate, ymin=25, ymax=45, xmin=7500, xmax=10000, adap=False, legend=True, width=3.5, height=3):
     def plot_cat(name):
         for a, thr in zip(data[name]['traces'], data[name]['thresholds']):
             #print(name, a[np.where(a[:, 0] == thr), :])
@@ -185,9 +185,9 @@ def plot_cost(data, rate, ymin=18, ymax=40, xmin=5500, xmax=7500, adap=False, le
     plt.ylabel('Cost ($)')
     if adap:
         plot_cat('ondemand_fixed'.format(rate))
-        plot_cat('105_90_{}'.format(rate))
-        plot_cat('105_80_{}'.format(rate))
-        plot_cat('110_80_{}'.format(rate))
+        # plot_cat('105_90_{}'.format(rate))
+        # plot_cat('105_80_{}'.format(rate))
+        # plot_cat('110_80_{}'.format(rate))
         plot_cat('adap_105_90_{}'.format(rate))
         plot_cat('adap_105_80_{}'.format(rate))
         plot_cat('adap_110_80_{}'.format(rate))
@@ -196,17 +196,17 @@ def plot_cost(data, rate, ymin=18, ymax=40, xmin=5500, xmax=7500, adap=False, le
         plot_cat('105_90_{}'.format(rate))
         plot_cat('105_80_{}'.format(rate))
         plot_cat('110_80_{}'.format(rate))
-    #plt.xlim(xmin, xmax)
-    #plt.ylim(ymin, ymax)
+    plt.xlim(xmin, xmax)
+    plt.ylim(ymin, ymax)
     if legend:
         plt.legend(loc=4)
     if adap:
-        plt.savefig('../{}_adap.pdf'.format(rate))
+        plt.savefig('../cost_adap_{}.pdf'.format(rate))
     else:
-        plt.savefig('../{}.pdf'.format(rate))
-    plt.show()
+        plt.savefig('../cost_{}.pdf'.format(rate))
+    # plt.show()
 
-def plot_acc(data, legend=False):
+def plot_acc(data, rate="fixed", adap=False, legend=False):
     def plot_line(name, linestyle='solid'):
         acc = []
         for a in data[name]['traces']:
@@ -224,10 +224,12 @@ def plot_acc(data, legend=False):
         #max     = np.ma.max(data, axis=0)
         avg     = np.ma.mean(acc, axis=0)
         #x       = np.arange(0, maxlen*1000, 1000) + 1000
-
+        plt.hlines( 85,
+                    xmin=0, xmax=200, alpha=0.2,
+                    color="lightgrey")
         plt.vlines( data[name]['mean_price'],
                     ymin=0, ymax=200, alpha=0.5,
-                    color=data[name]['color'], linestyle='dashed')
+                    color=data[name]['color'])
         plt.plot(   data[name]['mean_price'], 85,
                     color=data[name]['color'],
                     marker=data[name]['lg_marker'],
@@ -236,24 +238,26 @@ def plot_acc(data, legend=False):
         plt.plot(   avg[:, 1], avg[:, 0],
                     color=data[name]['color'],
                     linestyle=linestyle)
+        print(name, data[name]['mean_price'])
 
-    rate = "fixed"
-    plt.figure(figsize=(3, 2))
+    adap_prefix = "adap_" if adap else ""
+    plt.figure(figsize=(3.5, 2))
     plt.subplots_adjust(bottom=0.2)
     plt.subplots_adjust(left=0.18)
     plt.ylabel('Test set accuracy (%)')
     plt.xlabel('Cost ($)')
-    plot_line('ondemand_{}'.format(rate), linestyle='solid')
-    plot_line('105_80_{}'.format(rate), linestyle='dashed')
-    plot_line('110_80_{}'.format(rate), linestyle='dashed')
-    plot_line('105_90_{}'.format(rate), linestyle='dashed')
+    plot_line('ondemand_fixed'.format(rate), linestyle='solid')
+    plot_line('{}105_80_{}'.format(adap_prefix, rate), linestyle='dashed')
+    plot_line('{}110_80_{}'.format(adap_prefix, rate), linestyle='dashed')
+    plot_line('{}105_90_{}'.format(adap_prefix, rate), linestyle='dashed')
+    plt.xlim(0, 45)
     plt.ylim(0, 90)
     if legend:
         plt.legend()
-    plt.savefig('../acc.pdf')
-    plt.show()
+    plt.savefig('../plots/acc_{}{}.pdf'.format(adap_prefix, rate))
+    #plt.show()
 
-def plot_loss(data):
+def plot_loss(data, rate="fixed", adap=False):
     def plot_line(name, linestyle='solid'):
         acc = []
         for a in data[name]['traces']:
@@ -282,24 +286,23 @@ def plot_loss(data):
                     color=data[name]['color'],
                     linestyle=linestyle)
 
-    rate = "fixed"
-    plt.figure(figsize=(3, 2))
+    adap_prefix = "adap_" if adap else ""
+    plt.figure(figsize=(3.5, 2))
     plt.subplots_adjust(bottom=0.2)
     plt.subplots_adjust(left=0.18)
     plt.ylabel('Test set loss')
     plt.xlabel('Cost ($)')
-    plot_line('ondemand_{}'.format(rate), linestyle='solid')
-    plot_line('105_80_{}'.format(rate), linestyle='dashed')
-    plot_line('110_80_{}'.format(rate), linestyle='dashed')
-    plot_line('adap_110_80_{}'.format(rate), linestyle='dashed')
-    plot_line('105_90_{}'.format(rate), linestyle='dashed')
+    plot_line('ondemand_fixed', linestyle='solid')
+    plot_line('{}105_80_{}'.format(adap_prefix, rate), linestyle='dashed')
+    plot_line('{}110_80_{}'.format(adap_prefix, rate), linestyle='dashed')
+    plot_line('{}105_90_{}'.format(adap_prefix, rate), linestyle='dashed')
     plt.yscale('log')
     plt.grid(which='both', alpha=0.5)
     plt.legend()
-    plt.savefig('../loss.pdf')
+    plt.savefig('../plots/loss_{}{}.pdf'.format(adap_prefix, rate))
     plt.show()
 
-def plot_savings(data):
+def plot_savings_old(data):
     labels = ['High spot price \n homogeneous', 'Low spot price \n homogeneous', 'High spot price \n heterogeneous']
     ondemand = [100, 100, 100]
     spot_reg = [100 * data['105_90_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
@@ -320,7 +323,7 @@ def plot_savings(data):
     r0 = plt.bar(x - 3 * width / 8, ondemand, width/4, label='on demand', color='darkorange')
     r1 = plt.bar(x - width / 8,     spot_reg, width/4, label='regular cost optimization', color='steelblue')
     r2 = plt.bar(x + width / 8,     adap_reg, width/4, label='adaptive cost optimization', color='lightcoral')
-    r3 = plt.bar(x[:2] + 3 * width / 8, max_cost, width/4, label='cost upper bound', color='lightgrey')
+    r3 = plt.bar(x[:2] + 3 * width / 8, max_cost, width/4, label='cost lower bound', color='lightgrey')
     plt.ylabel('Cost ratio to on-demand only pricing')
     plt.xticks(x, labels)
     #plt.bar_label(r0, padding=1, fmt='%.0f%%')
@@ -331,6 +334,71 @@ def plot_savings(data):
     plt.ylim(0, 105)
     plt.savefig('../savings.pdf')
     plt.show()
+
+def plot_savings(data):
+    labels = ['Homogeneous', 'Heterogeneous']
+    ondemand = [100, 100]
+    spot_reg = [100 * data['105_90_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['105_90_dirichlet']['mean_price'] / data['ondemand_fixed']['mean_price']]
+    adap_reg = [100 * data['adap_105_90_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['adap_105_90_dirichlet']['mean_price'] / data['ondemand_fixed']['mean_price']]
+    max_cost = [100 * (data['105_90_fixed']['deadline'] + ((1 - (1/data['105_90_fixed']['deadline'])) * data['105_90_fixed']['deadline'] * (data['105_90_fixed']['availability'] * data['105_90_fixed']['mean_spot_price'] - data['105_90_fixed']['od_price']) / (data['105_90_fixed']['od_price'] * (1 - data['105_90_fixed']['availability']))))]
+
+    #print(adap_reg)
+
+    plt.figure(figsize=(3.5, 2.5))
+    plt.subplots_adjust(bottom=0.15, left=0.15)
+    width = 0.85
+    x = np.arange(len(labels))
+    r0 = plt.bar(x - 3 * width / 8, ondemand, width/4, label='on demand', color='darkorange')
+    r1 = plt.bar(x - width / 8,     spot_reg, width/4, label='regular cost optimization', color='steelblue')
+    r2 = plt.bar(x + width / 8,     adap_reg, width/4, label='adaptive cost optimization', color='lightcoral')
+    r3 = plt.bar(x[:1] + 3 * width / 8, max_cost, width/4, label='expect. cost', color='lightgrey')
+    plt.ylabel('Cost ratio to on-demand only pricing (%)')
+    plt.xticks(x, labels)
+    #plt.bar_label(r0, padding=1, fmt='%.0f%')
+    plt.bar_label(r1, padding=1, fmt='%.0f')
+    plt.bar_label(r2, padding=1, fmt='%.0f')
+    plt.bar_label(r3, padding=1, fmt='%.0f')
+    plt.legend(loc=4)
+    plt.ylim(0, 105)
+    plt.savefig('../plots/savings.pdf')
+    #plt.show()
+
+def plot_savings_new(data):
+    labels = ['$\\alpha$=0.8\n$\\theta/\\theta_0$=1.05', '$\\alpha$=0.8\n$\\theta/\\theta_0$=1.1', '$\\alpha$=0.9\n$\\theta/\\theta_0$=1.05']
+    ondemand = [100, 100, 100]
+    spot_reg = [100 * data['105_80_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['110_80_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['105_90_fixed']['mean_price'] / data['ondemand_fixed']['mean_price']]
+    adap_reg = [100 * data['adap_105_80_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['adap_110_80_fixed']['mean_price'] / data['ondemand_fixed']['mean_price'],
+                100 * data['adap_105_90_fixed']['mean_price'] / data['ondemand_fixed']['mean_price']]
+    max_cost = [100 * (data['105_80_fixed']['deadline'] + ((1 - (1/data['105_80_fixed']['deadline'])) * data['105_80_fixed']['deadline'] * (data['105_80_fixed']['availability'] * data['105_80_fixed']['mean_spot_price'] - data['105_80_fixed']['od_price']) / (data['105_80_fixed']['od_price'] * (1 - data['105_80_fixed']['availability'])))),
+                100 * (data['110_80_fixed']['deadline'] + ((1 - (1/data['110_80_fixed']['deadline'])) * data['110_80_fixed']['deadline'] * (data['110_80_fixed']['availability'] * data['110_80_fixed']['mean_spot_price'] - data['110_80_fixed']['od_price']) / (data['110_80_fixed']['od_price'] * (1 - data['110_80_fixed']['availability'])))),
+                100 * (data['105_90_fixed']['deadline'] + ((1 - (1/data['105_90_fixed']['deadline'])) * data['105_90_fixed']['deadline'] * (data['105_90_fixed']['availability'] * data['105_90_fixed']['mean_spot_price'] - data['105_90_fixed']['od_price']) / (data['105_90_fixed']['od_price'] * (1 - data['105_90_fixed']['availability']))))]
+
+    #print(adap_reg)
+    print(max_cost)
+
+    plt.figure(figsize=(3.5, 2.5))
+    plt.subplots_adjust(bottom=0.15, left=0.15)
+    width = 0.85
+    x = np.arange(len(labels))
+    r0 = plt.bar(x - 3 * width / 8, ondemand, width/4, label='on demand', color='darkorange')
+    r1 = plt.bar(x - width / 8,     spot_reg, width/4, label='regular cost optimization', color='steelblue')
+    r2 = plt.bar(x + width / 8,     adap_reg, width/4, label='adaptive cost optimization', color='lightcoral')
+    r3 = plt.bar(x + 3 * width / 8, max_cost, width/4, label='expect. cost', color='lightgrey')
+    plt.ylabel('Cost ratio to on-demand only pricing (%)')
+    plt.xticks(x, labels)
+    #plt.bar_label(r0, padding=1, fmt='%.0f%%')
+    plt.bar_label(r1, padding=1, fmt='%.0f')
+    plt.bar_label(r2, padding=1, fmt='%.0f')
+    plt.bar_label(r3, padding=1, fmt='%.0f')
+    plt.legend(loc=4)
+    plt.ylim(0, 105)
+    #plt.savefig('../plots/savings_new.pdf')
+    #plt.show()
 
 data = get_data()
 print(data["ondemand_fixed"]["mean_time"])
@@ -343,13 +411,29 @@ print(np.mean(data["ondemand_fixed"]["thresholds"]))
 #print(data['105_90_fixed']['mean_spot_price'])
 #print(data['lower_105_90_fixed']['mean_spot_price'])
 
-#plot_savings(data)
+plot_savings(data)
+plot_savings_new(data)
 
 #plot_loss(data)
 #plot_acc(data)
+# plot_acc(data, 'fixed', legend=False)
+# plot_acc(data, 'dirichlet', legend=True)
+# plot_acc(data, 'uniform', legend=True)
+# plot_acc(data, 'fixed', adap=True, legend=False)
+# plot_acc(data, 'dirichlet', adap=True, legend=True)
+# plot_acc(data, 'uniform', adap=True, legend=True)
 
-#plot_cost(data, 'fixed', legend=False)
-#plot_cost(data, 'dirichlet', adap=True)
-#plot_cost(data, 'fixed', adap=True)
-plot_cost(data, 'uniform', adap=True)
+# plot_loss(data, 'fixed')
+# plot_loss(data, 'dirichlet')
+# plot_loss(data, 'uniform')
+# plot_loss(data, 'fixed', adap=True)
+# plot_loss(data, 'dirichlet', adap=True)
+# plot_loss(data, 'uniform', adap=True)
+
+# plot_cost(data, 'fixed', legend=False)
+# plot_cost(data, 'dirichlet', legend=False)
+# plot_cost(data, 'uniform', ymin=15, ymax=50, height=4, legend=False)
+# plot_cost(data, 'fixed', adap=True, legend=False)
+# plot_cost(data, 'dirichlet', adap=True, legend=False)
+# plot_cost(data, 'uniform', ymin=15, ymax=50, height=4, adap=True, legend=False)
 #plot_cost(data, 'uniform', ymin=10, ymax=50, adap=True)

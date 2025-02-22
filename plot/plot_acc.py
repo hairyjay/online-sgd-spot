@@ -4,7 +4,7 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 import json
 
-timestamp = "20210620082307"
+timestamp = "drift/20250210232108"
 
 def get_acc_trace(timestamp):
     with open(os.path.join(timestamp, 'ts.npy'), 'rb') as f:
@@ -14,11 +14,11 @@ def get_acc_trace(timestamp):
 ax = plt.gca()
 i = 0
 thr = []
-for run in os.scandir(os.path.join('runs')):
+for run in os.scandir(os.path.join('../runs/drift')):
     if os.path.isdir(run):
         if os.path.exists(os.path.join(run, "stats.json")):
 
-            color = next(ax._get_lines.prop_cycler)['color']
+            color = "red"
             a = get_acc_trace(run)
             plt.plot(a[:, 0], a[:, 1], color=color)
 
@@ -36,7 +36,7 @@ plt.xlabel('Batches Arrived $\\frac{J}{K}$')
 plt.ylabel('Accuracy (%)')
 plt.title('Accuracy of model in relation to number of batches arrived')
 #plt.grid(True)
-plt.xlim(0, 800000)
-plt.ylim(0, 90)
+plt.xlim(0, 140000)
+plt.ylim(0, 100)
 #plt.legend()
 plt.show()

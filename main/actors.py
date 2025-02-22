@@ -136,7 +136,7 @@ class ParameterServer(object):
 
 @ray.remote(num_cpus=2)
 class PriceServer(object):
-    def __init__(self, price_distr, time_scale):
+    def __init__(self, price_distr, time_scale, drift={}):
         self.price_distr = price_distr
         self.workers = None
         self.start_time = None
@@ -145,6 +145,7 @@ class PriceServer(object):
         self.processed = 0
         self.ps_time = 1
         self.time_scale = time_scale
+        self.drift = drift
 
     def count_signal(self, arrival_count, processed, time):
         self.arrival_count = arrival_count
@@ -212,6 +213,12 @@ class PriceServer(object):
                     update_time -= interval
 
                     self.refresh_workers(allocation, adaptive, last_refresh)
+                
+                if self.drift:
+                    if last_update - self.start_time > self.drift["start"]:
+                        self.adap_allocate(allocation)
+                        self.drift = {}
+                
 
             last_refresh = time.time()
 
@@ -610,7 +617,7 @@ class Coordinator(object):
     def __init__(self, args, pricing, drift):
         self.args = args
         self.ts = TestServer.remote(self.Net, self.classes, drift=drift)
-        self.pr = PriceServer.remote(pricing, self.args.time_scale)
+        self.pr = PriceServer.remote(pricing, self.args.time_scale, drift=drift)
         self.ps = ParameterServer.remote(self.classes,
                                          self.Net,
                                          self.ts,

@@ -71,7 +71,7 @@ class InstanceAllocation(object):
     def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
         spot = np.zeros(self.N)
         if elapsed > self.drift_time:
-            self.t = self.orig_t + self.drift_time
+            self.t = self.orig_t - self.drift_time + 275
         t = max(self.t - elapsed, 1.0)
         J = max(self.J - arrived, 1)
         if a == None:
