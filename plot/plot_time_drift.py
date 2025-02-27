@@ -1,8 +1,12 @@
 import numpy as np
 import os
 from scipy.stats import norm
+import matplotlib
 import matplotlib.pyplot as plt
 import json
+
+matplotlib.rcParams['mathtext.fontset'] = 'stix'
+matplotlib.rcParams['font.family'] = 'STIXGeneral'
 
 #type = "binomial"
 type = "uniform"
@@ -24,8 +28,9 @@ def get_price_trace(timestamp):
         a = np.load(f)
         return a
 
-fig, ax1 = plt.subplots()
+fig, ax1 = plt.subplots(figsize=(3.5, 2.5))
 ax2 = ax1.twinx()
+fig.subplots_adjust(bottom=0.16, left=0.15, right=0.87)
 i = 0
 thr = []
 for run in os.scandir('../runs/drift/110_90'):
@@ -39,7 +44,7 @@ for run in os.scandir('../runs/drift/110_90'):
                 #if pricing is None:
                 #preempt_type = data["preempt"]["distribution"]
                 #if preempt_type == type:
-                color = 'blue'
+                color = 'green'
                 #threshold = data["target_itr"]
 
                 acc = get_acc_trace(run)
@@ -56,23 +61,25 @@ for run in os.scandir('../runs/drift/110_90'):
                         threshold = acc_time[i-1, 2]
                         break
                 if threshold > 0:
-                    ax1.vlines(threshold, ymin=0, ymax=100, color=color, linestyle='dashed', alpha=0.5)
+                    ax1.vlines(threshold, ymin=0, ymax=100, color=color, linestyle='dashed')
                 thr.append(threshold)
                 #plt.vlines(acc_time[np.where(acc_time[:, 0] == threshold), 2], ymin=0, ymax=100, color=color, linestyle='dashed')
                 ax1.plot(acc_time[:, 2], acc_time[:, 1], color=color, label="$N = {}$".format(data["size"]))
 
                 price = get_price_trace(run)
                 ax2.fill_between(price[:, 0], price[:, 2], color=color, label="$N = {}$".format(data["size"]), alpha=.1, linewidth=0.0)
+                ax2.text(150, price[0, 2]-5, "$N_s$ = {}".format(int(price[0, 2])))
+                ax2.text(threshold/2+250, price[-1, 2]+1.5, "$N_s$ = {}".format(int(price[-1, 2])))
             i += 1
 
-ax1.hlines(90, xmin=0, xmax=8500, linestyle='dashed', alpha=0.5)
+#ax1.hlines(90, xmin=0, xmax=8500, linestyle='dashed', alpha=0.5)
 mean_thr = np.mean(thr)
 print(mean_thr)
-ax1.vlines(mean_thr, ymin=0, ymax=90, linestyle='dashed')
+#ax1.vlines(mean_thr, ymin=0, ymax=90, linestyle='dashed')
 
 ax1.set_xlabel('Wall-clock time (s)')
 ax1.set_ylabel('Accuracy (%)')
-ax2.set_ylabel('Number of spot instances provisioned N_s')
+ax2.set_ylabel('Spot instances provisioned $N_s$')
 #plt.title('Accuracy in wall-clock time for {} preemption'.format(type))
 #plt.grid(True)
 #plt.xlim(0, 150000) #BINOM
@@ -88,4 +95,5 @@ ax2.set_ylim(0, 64)
 #UNIF
 #ax1.legend(s_handles, s_labels)
 #plt.legend()
+plt.savefig('../plots/drift.pdf')
 plt.show()
