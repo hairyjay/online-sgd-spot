@@ -94,7 +94,7 @@ spec:
               memory: "24G"
             requests:
               cpu: "1700m"
-              memory: "7G"
+              memory: "3G"
   - groupName: doll-ts
     replicas: 1
     minReplicas: 1
@@ -133,10 +133,14 @@ spec:
                 command: ["/bin/sh","-c","ray stop"]
           resources:
             limits:
-              cpu: "8"
-              memory: "24G"
+              cpu: "4"
+              memory: "14G"
               nvidia.com/gpu: "1"
             requests:
               cpu: "3500m"
               memory: "14G"
-              nvidia.com/gpu: "1"
+              # nvidia.com/gpu: "1"     
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule

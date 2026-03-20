@@ -14,7 +14,7 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
 
 0. For the Kubernetes setting, nodes must be set up and managed separately. [Helm](https://helm.sh/) must be installed to install packages on the cluster.
     - ps: c7i.xlarge
-    - ts: g4dn.xlarge
+    - ts: g4dn.xlarge (AMI: AL2023_x86_64_NVIDIA)
     - workers: m4.large
 
 1. Connect to the EKS clusters (Step 2), i.e.
@@ -27,17 +27,22 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     helm install kuberay-operator kuberay/kuberay-operator --version 1.0.0
     ```
 
-3. Launch a Ray cluster with custom resource configuration:
+3. Install NVIDIA GPU support on Kubernetes
+    ```
+    kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.1/deployments/static/nvidia-device-plugin.yml
+    ```
+
+4. Launch a Ray cluster with custom resource configuration:
     ```
     kubectl apply -f k8s-raycluster.yaml
     ```
 
-4. Start port forwarding to the Ray Dashboard in a separate shell tab:
+5. Start port forwarding to the Ray Dashboard in a separate shell tab:
     ```
     kubectl port-forward services/raycluster-head-svc 8265:8265
     ```
 
-5. Make sure all pods are running:
+6. Make sure all pods are running:
     ```
     kubectl get pods
     # NAME                               READY   STATUS    RESTARTS   AGE
@@ -47,12 +52,12 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     # raycluster-worker-doll-w-f9jlw     1/1     Running   0          26m
     ```
 
-6. Copy code files and price trace data to head pod:
+7. Copy code files and price trace data to head pod:
     ```
     bash copy-all.sh
     ```
     
-7. SSH into the head node:
+8. SSH into the head node:
     ```
     kubectl exec --stdin --tty raycluster-head-fq7st -- /bin/bash
     ```

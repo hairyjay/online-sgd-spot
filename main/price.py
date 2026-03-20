@@ -66,12 +66,14 @@ class InstanceAllocation(object):
             self.q_turn_on = 1 / ((1 - self.a) * cycles)
         self.drift_time = 0
         if drift:
-            self.drift_time = drift["start"] + drift["time"]
+            self.drift_time = []
+            for i in range(len(drift["start"])):
+                self.drift_time.append(drift["start"][i] + drift["time"][i])
 
     def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
         spot = np.zeros(self.N)
-        if elapsed > self.drift_time:
-            self.t = self.orig_t - self.drift_time + 275
+        if elapsed > min(self.drift_time):
+            self.t = self.orig_t - min(self.drift_time) + 275
         t = max(self.t - elapsed, 1.0)
         J = max(self.J - arrived, 1)
         if a == None:

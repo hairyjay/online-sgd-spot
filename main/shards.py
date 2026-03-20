@@ -7,24 +7,24 @@ class Shards(actors.Coordinator):
     def __init__(self, args, pricing, drift, classes=0):
         self.drift_mask = (np.empty(shape=0), np.empty(shape=0), None)
         if drift:
-            if drift["cats"]*2 >= classes:
+            if sum(drift["cats"])*2 >= classes:
                 raise ValueError("Withheld classes for drift may not exceed half of total classes")
             if drift["rand"]:
-                self.drift_classes = np.random.choice(classes, size=drift["cats"]*2, replace=False)
+                self.drift_classes = np.random.choice(classes, size=sum(drift["cats"])*2, replace=False)
             else:
-                self.drift_classes = np.arange(classes-drift["cats"]*2, classes)
+                self.drift_classes = np.arange(classes-sum(drift["cats"])*2, classes)
             print(self.drift_classes)
             self.drift_map = np.zeros(classes, dtype=np.int32)
             self.drift_map -= 1
-            self.drift_map[self.drift_classes[:drift["cats"]]] = np.arange(drift["cats"])
-            self.drift_map[self.drift_classes[drift["cats"]:]] = np.arange(drift["cats"])
-            i = drift["cats"]
+            self.drift_map[self.drift_classes[:sum(drift["cats"])]] = np.arange(sum(drift["cats"]))
+            self.drift_map[self.drift_classes[sum(drift["cats"]):]] = np.arange(sum(drift["cats"]))
+            i = sum(drift["cats"])
             for n in range(len(self.drift_map)):
                 if self.drift_map[n] == -1:
                     self.drift_map[n] = i
                     i += 1
-            self.drift_mask = (self.drift_classes, self.drift_map, classes - drift["cats"])
-            self.classes = classes - drift["cats"]
+            self.drift_mask = (self.drift_classes, self.drift_map, classes - sum(drift["cats"]))
+            self.classes = classes - sum(drift["cats"])
         super().__init__(args, pricing, drift)
 
     def testset(self):
@@ -66,6 +66,7 @@ class Shards(actors.Coordinator):
                                                             expected_itr=self.args.J,
                                                             target_acc=self.args.target,
                                                             autoexit=self.args.autoexit,
+                                                            force_exit=self.args.force_exit,
                                                             mask=self.drift_mask))
         print("ready to start batch_producer tasks")
 
@@ -121,3 +122,11 @@ class DataPartitioner(object):
 
     def use(self, partition):
         return Partition(self.data, self.partitions[partition])
+    
+def drift_split(list, lens):
+    n = 0
+    split_list = []
+    for i in lens:
+        split_list.append(list[n:n+i])
+        n += i
+    return split_list

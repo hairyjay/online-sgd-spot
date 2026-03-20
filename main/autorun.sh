@@ -6,16 +6,28 @@
 #  echo "RUN $i END"
 #done
 set -e
-i=0
+# i=0
 
-while [ $(ls -l ./runs/ | grep -c ^d) -lt 4 ]
-do
-  echo "RUN $i START"
+# while [ $(ls -l ./runs/ | grep -c ^d) -lt 4 ]
+# do
+#   echo "RUN $i START"
   #python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=8400 --J=250000 --a=0.9 --distr=uniform -e -d
-  python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=4200 --J=125000 --a=0.9 -e --target=0.9 d --drift-start=1000 --drift-time=0
-  echo "RUN $i END"
-  i=$[$i+1]
-done
+#   python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=4200 --J=125000 --a=0.9 -e --target=0.9 -f=6000 d --drift-start 1000 1000 1000 1000 --drift-time 10 100 1000 10000 --drift-cats 5 5 5 5
+#   echo "RUN $i END"
+#   i=$[$i+1]
+# done
+
+echo "RUN 1 START"
+python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=4200 --J=125000 --a=0.9 -e --target=0.9 -f=4500 d --drift-start 1000 1000 1000 1000 --drift-time 10 100 1000 10000 --drift-cats 5 5 5 5
+echo "RUN 1 END"
+
+echo "RUN 2 START"
+python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=4200 --J=125000 --a=0.9 -e --target=0.9 -f=4500 d --drift-start 1000 1110 1310 2410 --drift-time 10 100 1000 10000 --drift-cats 5 5 5 5
+echo "RUN 2 END"
+
+echo "RUN 3 START"
+python -m main.preempt --size=64 --K=20 --bs=256 --t=0.008 --d=4200 --J=125000 --a=0.9 -e --target=0.9 -f=4500 d --drift-start 1450 1400 1200 1000 --drift-time 10 100 1000 10000 --drift-cats 5 5 5 5
+echo "RUN 3 END"
 
 # while [ $(ls -l ./runs/ | grep -c ^d) -lt 5 ]
 # do

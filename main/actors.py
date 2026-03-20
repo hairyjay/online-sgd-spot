@@ -16,7 +16,7 @@ from . import shards
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=4)
+@ray.remote(num_cpus=2)
 class ParameterServer(object):
     def __init__(self, classes, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
         self.params = 0
@@ -215,7 +215,7 @@ class PriceServer(object):
                     self.refresh_workers(allocation, adaptive, last_refresh)
                 
                 if self.drift:
-                    if last_update - self.start_time > self.drift["start"]:
+                    if last_update - self.start_time > min(self.drift["start"]):
                         self.adap_allocate(allocation)
                         self.drift = {}
                 
@@ -286,7 +286,7 @@ class PriceServer(object):
 # test server
 ##################################################################
 
-@ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net, classes, drift={}):
@@ -316,7 +316,7 @@ class TestServer(object):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
 
-    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False, mask=None):
+    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None):
         testset = get_testset(self.device.type)
         self.augment = get_augment()
         torch.set_num_threads(4)
@@ -332,9 +332,11 @@ class TestServer(object):
             #self.drift_weights = np.ones(len(mask[1]))
             self.drift_weights = np.ones(testset.targets.size())
             self.drift_withdrawn = len(mask[0]) // 2
-            self.drift_mask_p = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
-            self.drift_mask_n = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
-            self.drift_weights[self.drift_mask_n] = 0
+            self.drift_mask_p_all = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
+            self.drift_mask_p = shards.drift_split(self.drift_mask_p_all, self.drift["cats"])
+            self.drift_mask_n_all = np.concatenate([np.argwhere(testset.targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
+            self.drift_mask_n = shards.drift_split(self.drift_mask_n_all, self.drift["cats"])
+            self.drift_weights[self.drift_mask_n_all] = 0
             #print(self.drift_mask, len(self.drift_mask), self.drift_withdrawn, self.drift_weights)
             #print(testset.targets.size())
             self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, batch_size)
@@ -358,14 +360,15 @@ class TestServer(object):
             test_time = test_start - start_time
             print(test_time)
             if self.drift:
-                if test_time > self.drift["start"]:
-                    if test_time > self.drift["start"] + self.drift["time"]:
-                        self.drift_weights[self.drift_mask_p] = 0
-                        self.drift_weights[self.drift_mask_n] = 1
-                    else:
-                        self.drift_weights[self.drift_mask_p] = 1 - (test_time - self.drift["start"]) / self.drift["time"]
-                        self.drift_weights[self.drift_mask_n] = (test_time - self.drift["start"]) / self.drift["time"]
-                    self.sampler.weights = torch.as_tensor(self.drift_weights)
+                for i, start in enumerate(self.drift["start"]):
+                    if test_time > start:
+                        if test_time > start + self.drift["time"][i]:
+                            self.drift_weights[self.drift_mask_p[i]] = 0
+                            self.drift_weights[self.drift_mask_n[i]] = 1
+                        else:
+                            self.drift_weights[self.drift_mask_p[i]] = 1 - (test_time - start) / self.drift["time"][i]
+                            self.drift_weights[self.drift_mask_n[i]] = (test_time - start) / self.drift["time"][i]
+                        self.sampler.weights = torch.as_tensor(self.drift_weights)
             for i, param in enumerate(self.net.parameters()):
                 param.data = self.weights[itr][i].to(self.device)
             del self.weights[itr]
@@ -377,6 +380,11 @@ class TestServer(object):
 
             if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):
                 print("AUTOEXITING...")
+                self.terminate()
+                break
+
+            if test_time > force_exit:
+                print("FORCED EXITING")
                 self.terminate()
                 break
 
@@ -492,9 +500,11 @@ class Worker(object):
                     targets = trainset.targets
                 self.drift_weights = np.ones(targets.size())
                 self.drift_withdrawn = len(mask[0]) // 2
-                self.drift_mask_p = np.concatenate([np.argwhere(targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
-                self.drift_mask_n = np.concatenate([np.argwhere(targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
-                self.drift_weights[self.drift_mask_n] = 0
+                self.drift_mask_p_all = np.concatenate([np.argwhere(targets == c) for c in mask[0][:self.drift_withdrawn]], axis=None)
+                self.drift_mask_p = shards.drift_split(self.drift_mask_p_all, self.drift["cats"])
+                self.drift_mask_n_all = np.concatenate([np.argwhere(targets == c) for c in mask[0][self.drift_withdrawn:]], axis=None)
+                self.drift_mask_n = shards.drift_split(self.drift_mask_n_all, self.drift["cats"])
+                self.drift_weights[self.drift_mask_n_all] = 0
                 self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, self.B)
                 self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, sampler=self.sampler)
                 self.drift_map = torch.from_numpy(mask[1]).long()
@@ -520,13 +530,14 @@ class Worker(object):
             batch_start = time.time()
             batch_time = batch_start - start_time
             if self.drift:
-                if batch_time > self.drift["start"]:
-                    if batch_time > self.drift["start"] + self.drift["time"]:
-                        self.drift_weights[self.drift_mask_p] = 0
-                        self.drift_weights[self.drift_mask_n] = 1
-                    else:
-                        self.drift_weights[self.drift_mask_p] = 1 - (batch_time - self.drift["start"]) / self.drift["time"]
-                        self.drift_weights[self.drift_mask_n] = (batch_time - self.drift["start"]) / self.drift["time"]
+                for i, start in enumerate(self.drift["start"]):
+                    if batch_time > start:
+                        if batch_time > start + self.drift["time"][i]:
+                            self.drift_weights[self.drift_mask_p[i]] = 0
+                            self.drift_weights[self.drift_mask_n[i]] = 1
+                        else:
+                            self.drift_weights[self.drift_mask_p[i]] = 1 - (batch_time - start) / self.drift["time"][i]
+                            self.drift_weights[self.drift_mask_n[i]] = (batch_time - start) / self.drift["time"][i]
                 try:
                     self.sampler.weights = torch.as_tensor(self.drift_weights)
                 except:
