@@ -64,7 +64,7 @@ class InstanceAllocation(object):
         else:
             self.q_turn_off = 1 / (self.a * cycles)
             self.q_turn_on = 1 / ((1 - self.a) * cycles)
-        self.drift_time = 0
+        self.drift_time = [0]
         if drift:
             self.drift_time = []
             for i in range(len(drift["start"])):

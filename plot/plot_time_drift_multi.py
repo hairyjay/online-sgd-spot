@@ -125,11 +125,12 @@ for run in os.scandir('../runs/drift_2026'):
             #UNIF
             #ax1.legend(s_handles, s_labels)
             #plt.legend()
-            plt.savefig('../plots/drift_2026_{}.pdf'.format(idx))
             # plt.show()
 
             idx += 1
-            fig, ax1 = plt.subplots(figsize=(3.5, 2.5))
-            ax2 = ax1.twinx()
-            fig.subplots_adjust(bottom=0.16, left=0.15, right=0.87)
+            # fig, ax1 = plt.subplots(figsize=(3.5, 2.5))
+            # ax2 = ax1.twinx()
+            # fig.subplots_adjust(bottom=0.16, left=0.15, right=0.87)
             thr = []
+
+plt.savefig('../plots/drift_2026.pdf'.format(idx))

@@ -16,7 +16,8 @@ from . import shards
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=2)
+@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
+#@ray.remote(num_cpus=2)             #CPU MODEL
 class ParameterServer(object):
     def __init__(self, classes, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
         self.params = 0
@@ -25,6 +26,7 @@ class ParameterServer(object):
         self.t = t
         self.b = B
         self.queue = asyncio.Queue()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.processed = 0
         self.ts = ts
         self.pr = pr
@@ -42,8 +44,8 @@ class ParameterServer(object):
 
         self.arrival_count = None
 
-        self.net = Net(classes)
-        print("param server init")
+        self.net = Net(classes).to(self.device)
+        print("param server init on device {}".format(self.device))
 
     def ready_signal(self, worker_index):
         self.ready_workers[worker_index] = True
@@ -113,8 +115,8 @@ class ParameterServer(object):
 
     def apply_gradients(self, gradients):
         for i, param in enumerate(self.net.parameters()):
-            grad = np.mean([g[i] for g in gradients], axis = 0)
-            param.data -= self.lr * torch.from_numpy(grad)
+            grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0)
+            param.data -= self.lr * grad
         self.processed += self.k
         del grad
 
@@ -134,7 +136,7 @@ class ParameterServer(object):
 # price server
 ##################################################################
 
-@ray.remote(num_cpus=2)
+@ray.remote(num_cpus=1)
 class PriceServer(object):
     def __init__(self, price_distr, time_scale, drift={}):
         self.price_distr = price_distr
@@ -146,6 +148,7 @@ class PriceServer(object):
         self.ps_time = 1
         self.time_scale = time_scale
         self.drift = drift
+        print("Price Server init")
 
     def count_signal(self, arrival_count, processed, time):
         self.arrival_count = arrival_count
@@ -157,7 +160,6 @@ class PriceServer(object):
         if self.workers is None:
             self.workers = workers
         self.arrival_count = np.zeros(len(self.workers))
-    
         self.p_spot, update_time = self.price_distr.get_price()
         self.p_on_demand = self.price_distr.get_on_demand()
     
@@ -168,6 +170,7 @@ class PriceServer(object):
         self.availability = 1
         self.spot_time = 1
         self.on_time = np.ones(N)
+        print(adaptive)
 
         if adaptive:
             self.persistence = np.ones(N)
@@ -443,7 +446,8 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=2)
+@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
+#@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
     def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, lr=0.03, opt='sgd', drift={}):
         self.worker_index = worker_index
@@ -592,16 +596,15 @@ class Worker(object):
         #if torch.isnan(output).any():
             #print(output, target)
             #print(torch.isnan(data).any())
-        map_target.to(self.device)
         #print("target to device")
-        loss = self.criterion(output, map_target)
-        #print(self.worker_index, "loss:", loss.shape)
+        loss = self.criterion(output, map_target.to(self.device))
+        # print(self.worker_index, "loss:", loss.shape)
         self.optimizer.zero_grad()
         loss.backward()
 
         grads = []
         for param in self.net.parameters():
-            grads.append(param.grad.data.numpy())
+            grads.append(param.grad.data)
 
         del self.batches[itr], data, aug_data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
