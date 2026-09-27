@@ -5,7 +5,7 @@ This is documentation for the paper **DOLL: Distributed OnLine Learning Using Pr
 1. *DOLL: Distributed OnLine Learning Using Preemptible Cloud Instances*, MAMA Workshop at SIGMETRICS 2022. [[ACM](https://dl.acm.org/doi/abs/10.1145/3561074.3561082)] [[PDF](https://www.sigmetrics.org/mama/2022/abstracts/Jiang.pdf)]
 2. *DOLL: Distributed OnLine Learning Using Preemptible Cloud Instances*, WiOpt 2023. [[IEEE](https://ieeexplore.ieee.org/abstract/document/10349831)] [[Technical Report](https://research.ece.cmu.edu/lions/Papers/DOLL.pdf)]
 
-## Environment (2024-07-31)
+## Environment
 The multi-machine parallelism used in the experiments is achieved using the Ray package in Python. Tasks in environments are distributed across multiple VMs on AWS EC2 clusters.
 
 For experiments in [1, 2], the environment is on clusters directly launched by Ray on AWS. This can only be run on on-demand clusters and may be more expensive. The Ray cluster launcher can be used by following [this guide](https://docs.ray.io/en/latest/cluster/vms/user-guides/launching-clusters/aws.html). The YAML files for the cluster can be found in the root directory of the repository.
@@ -36,6 +36,7 @@ For the paper data in [3], the experiment environment for DOLL is hosted on Kube
     ```
     kubectl apply -f k8s-raycluster.yaml
     ```
+    (2026-09) Use `k8s-raycluster-gpu.yaml` for a homogeneous gpu cluster of `N+2` nodes
 
 5. Start port forwarding to the Ray Dashboard in a separate shell tab:
     ```

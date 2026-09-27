@@ -20,6 +20,9 @@ spec:
       dashboard-host: '0.0.0.0'
     #pod template
     template:
+      metadata:
+        labels:
+          doll: ray
       spec:
         nodeSelector:
           eks.amazonaws.com/nodegroup: gpu
@@ -65,7 +68,7 @@ spec:
     template:
       metadata:
         labels:
-          key: value
+          doll: ray
         # annotations for pod
         annotations:
           key: value
@@ -110,7 +113,7 @@ spec:
     template:
       metadata:
         labels:
-          key: value
+          doll: ray
         # annotations for pod
         annotations:
           key: value

@@ -29,6 +29,7 @@ parser.add_argument('--bs', default=32, type=int, help='batch size on each worke
 parser.add_argument('--t', default=0.008, type=float, help='mean inter-arrival time of an individual data point')
 parser.add_argument('--time-scale', default=1, type=float, help='time scaling factor')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
+parser.add_argument('--k-adap', default=False, action='store_true', help='adaptive doubling of K batches per update if converges too early')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
 parser.add_argument('--target', default=0, type=float, help='target accuracy')
 parser.add_argument('--J', default=195000, type=int, help='target iterations')

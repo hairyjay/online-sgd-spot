@@ -23,6 +23,8 @@ class ParameterServer(object):
         self.params = 0
         self.lr = lr
         self.k = k
+        # self.k_eff = k
+        # self.k_adap_power = 0
         self.t = t
         self.b = B
         self.queue = asyncio.Queue()
@@ -125,8 +127,11 @@ class ParameterServer(object):
         for param in self.net.parameters():
             weights.append(param.data)
 
-        self.ts.test_acc.remote(weights, self.processed)
-        del weights
+        ref = self.ts.test_acc.remote(weights, self.processed)
+        # self.k_adap_power = ray.get(ref)
+        # self.k_eff = self.k * (2**self.k_adap_power)
+        # print("K: ", self.k, self.k_eff, self.k_adap_power)
+        del weights, ref
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -289,10 +294,10 @@ class PriceServer(object):
 # test server
 ##################################################################
 
-@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
-    def __init__(self, Net, classes, drift={}):
+    def __init__(self, Net, classes, k_adap=False, drift={}):
         self.processed = 0
         self.weights = {}
         self.queue = asyncio.Queue()
@@ -301,6 +306,10 @@ class TestServer(object):
         self.is_testset_list = False
         self.net = Net(classes).to(self.device)
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
+
+        self.k_adap = k_adap
+        self.k_adap_power = 0
+        self.last_k_adap = 0
 
         self.drift = drift
         self.drift_weights = None
@@ -318,6 +327,7 @@ class TestServer(object):
     def test_acc(self, weights, itr):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
+        # return self.k_adap_power
 
     async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None):
         testset = get_testset(self.device.type)
@@ -397,6 +407,13 @@ class TestServer(object):
                     self.target_itr = self.processed
                     print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_10_acc))
 
+            if self.k_adap and len(accuracy) > self.last_k_adap + 20:
+                last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
+                last_20_acc = np.mean(np.array([a[1] for a in accuracy[-20:-11]]))
+                if last_20_acc > last_10_acc:
+                    self.k_adap_power += 1
+                    self.last_k_adap = len(accuracy)
+
             print("TEST TIME: {}".format(time.time() - test_start))
 
         return 'ts', np.array(accuracy)
@@ -446,7 +463,7 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
     def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, lr=0.03, opt='sgd', drift={}):
@@ -489,6 +506,10 @@ class Worker(object):
         self.queue.put_nowait(signal)
         return True
 
+    def adap_b_signal(self, b):
+        self.B = b
+        return True
+
     async def batch_producer(self, get_trainset, get_augment, t=0.001, mask=None):
         #print(self.worker_index, 1/t, t)
         torch.set_num_threads(4)
@@ -510,15 +531,21 @@ class Worker(object):
                 self.drift_mask_n = shards.drift_split(self.drift_mask_n_all, self.drift["cats"])
                 self.drift_weights[self.drift_mask_n_all] = 0
                 self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, self.B)
-                self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, sampler=self.sampler)
+                self.train_loader = torch.utils.data.DataLoader(trainset,
+                                                                collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
+                                                                batch_size=self.B,
+                                                                sampler=self.sampler)
                 self.drift_map = torch.from_numpy(mask[1]).long()
                 #print(self.drift_weights.size, self.drift_mask_p.size, self.drift_mask_n.size)
             except:
                 import traceback
                 traceback.print_exc()
         else:
-            self.train_loader = torch.utils.data.DataLoader(trainset, batch_size=self.B, shuffle=True)
-            self.drift_map = torch.from_numpy(self.drift_map).long()
+            self.train_loader = torch.utils.data.DataLoader(trainset,
+                                                            collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
+                                                            batch_size=self.B,
+                                                            shuffle=True)
+            self.drift_map = torch.from_numpy(self.drift_map).long().to(self.device)
         self.iterator = iter(self.train_loader)
 
         self.ps.ready_signal.remote(self.worker_index)
@@ -577,6 +604,7 @@ class Worker(object):
 
     def compute_gradients(self, weights, itr):
         batch_start = time.time()
+        # chkpt = batch_start
 
         for i, param in enumerate(self.net.parameters()):
             param.data = weights[i].to(self.device)
@@ -586,12 +614,24 @@ class Worker(object):
         except StopIteration:
             self.iterator = iter(self.train_loader)
             data, target = next(self.iterator)
+        # if self.worker_index == 0:
+        #     print("runtime {}A: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
         #print(self.worker_index, target, self.drift_map)
         map_target = self.drift_map[target]
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
+        # if self.worker_index == 0:
+        #     print("runtime {}B: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
         self.net.train()
         aug_data = self.augment(data.to(self.device))
+        # if self.worker_index == 0:
+        #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
         output = self.net(aug_data)
+        # if self.worker_index == 0:
+        #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
         #print(self.worker_index, output.shape)
         #if torch.isnan(output).any():
             #print(output, target)
@@ -599,8 +639,14 @@ class Worker(object):
         #print("target to device")
         loss = self.criterion(output, map_target.to(self.device))
         # print(self.worker_index, "loss:", loss.shape)
+        # if self.worker_index == 0:
+        #     print("runtime {}E: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
         self.optimizer.zero_grad()
         loss.backward()
+        # if self.worker_index == 0:
+        #     print("runtime {}F: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
 
         grads = []
         for param in self.net.parameters():
@@ -608,6 +654,9 @@ class Worker(object):
 
         del self.batches[itr], data, aug_data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
+        # if self.worker_index == 0:
+            # print("runtime {}G: {}".format(itr, time.time() - chkpt))
+            # print("runtime {} total: {}".format(itr, time.time() - batch_start))
         return grads
 
     def preempt(self):
@@ -623,6 +672,7 @@ class Worker(object):
 ##################################################################
 # coordinator class
 ##################################################################
+from ray.experimental.collective import create_collective_group
 
 class Coordinator(object):
     class Net():
@@ -630,7 +680,7 @@ class Coordinator(object):
 
     def __init__(self, args, pricing, drift):
         self.args = args
-        self.ts = TestServer.remote(self.Net, self.classes, drift=drift)
+        self.ts = TestServer.remote(self.Net, self.classes, k_adap=self.args.K, drift=drift)
         self.pr = PriceServer.remote(pricing, self.args.time_scale, drift=drift)
         self.ps = ParameterServer.remote(self.classes,
                                          self.Net,
@@ -652,6 +702,7 @@ class Coordinator(object):
                                               lr=self.args.lr,
                                               opt=self.args.optimizer,
                                               drift=drift))
+        self.group = create_collective_group([self.ts, self.pr, self.ps] + self.workers, backend="torch_gloo")
         self.processes = []
 
     def run(self):
