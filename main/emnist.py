@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from kornia.morphology import erosion, dilation
@@ -38,11 +39,18 @@ class EMNISTShards(shards.Shards):
         self.norm_std = 0.3081
         self.norm_min = -0.42421296
         self.train_transform = transforms.Compose([
-                               transforms.ToTensor(),
-                               v2.Lambda(self.rand_thicken),
+                                transforms.ToTensor(),
+                                v2.Lambda(self.rand_thicken),
+                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
+                                v2.RandomPerspective(),
+                                v2.RandomAffine(30, translate=(0.1, 0.1)),
+                                v2.Normalize((self.norm_mean,), (self.norm_std,)),
+                                v2.Lambda(self.fill_nan)
         ])
         self.test_transform = transforms.Compose([
-                               transforms.ToTensor()
+                                transforms.ToTensor(),
+                                v2.Normalize((self.norm_mean,), (self.norm_std,)),
+                                v2.Lambda(self.fill_nan)
         ])
 
     def testset(self):
@@ -59,21 +67,26 @@ class EMNISTShards(shards.Shards):
                                             download=True,
                                             transform=self.train_transform), False
 
-    def get_test_augment(self):
-        return torch.nn.Sequential(
-            v2.Normalize((self.norm_mean,), (self.norm_std,)),
-            v2.Lambda(self.fill_nan)
-        )
+    # def get_test_augment(self):
+    #     return torch.nn.Sequential(
+    #         v2.Normalize((self.norm_mean,), (self.norm_std,)),
+    #         v2.Lambda(self.fill_nan)
+    #     )
     
-    def get_train_augment(self):
-        return torch.nn.Sequential(
-            v2.ElasticTransform(alpha=30.0, sigma=3.0),
-            v2.RandomPerspective(),
-            v2.RandomAffine(30, translate=(0.1, 0.1)),
-            v2.Normalize((self.norm_mean,), (self.norm_std,)),
-            v2.Lambda(self.fill_nan)
-        )
-    
+    # def get_train_augment(self):
+    #     return torch.nn.Sequential(
+    #         v2.ElasticTransform(alpha=30.0, sigma=3.0),
+    #         v2.RandomPerspective(),
+    #         v2.RandomAffine(30, translate=(0.1, 0.1)),
+    #         v2.Normalize((self.norm_mean,), (self.norm_std,)),
+    #         v2.Lambda(self.fill_nan)
+    #     )
+
+    def get_scheduler(self, parameters):
+        if self.args.optimizer == 'adam':
+            return optim.Adam(parameters, lr=self.args.lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08), None
+        else:
+            return optim.SGD(parameters, lr=self.args.lr, momentum=0, weight_decay=5e-4), None
 
     def rand_thicken(self, image:torch.Tensor) -> torch.Tensor:
         image = torch.unsqueeze(image.float(), 0)

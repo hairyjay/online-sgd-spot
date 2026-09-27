@@ -11,6 +11,7 @@ import torch.optim as optim
 from . import data_tools
 from . import shards
 #from . import price
+from torch.amp import autocast
 
 ##################################################################
 # parameter server
@@ -19,9 +20,9 @@ from . import shards
 @ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=2)             #CPU MODEL
 class ParameterServer(object):
-    def __init__(self, classes, Net, ts, pr, size, time_scale, lr=0.005, k=5, t=100, B=256):
+    def __init__(self, classes, Net, ts, pr, size, time_scale, k=5, t=100, B=256):
         self.params = 0
-        self.lr = lr
+        # self.lr = lr
         self.k = k
         # self.k_eff = k
         # self.k_adap_power = 0
@@ -66,11 +67,12 @@ class ParameterServer(object):
         #print(itr)
         return True
 
-    async def queue_consumer(self, workers, start_time):
+    async def queue_consumer(self, workers, start_time, opt):
         if self.workers is None:
             self.workers = workers
         self.start_time = start_time
         self.arrival_count = np.zeros(len(self.workers))
+        self.optimizer, self.scheduler = opt(self.net.parameters())
 
         # CLEAR QUEUE AFTER CALIBRATION
         while not self.training:
@@ -116,11 +118,19 @@ class ParameterServer(object):
             await asyncio.sleep(0)
 
     def apply_gradients(self, gradients):
+        # lr = None
+        # if type(self.lr) is int:
+        #     lr = self.lr
+        # else if :
+        #     lr = 
         for i, param in enumerate(self.net.parameters()):
-            grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0)
-            param.data -= self.lr * grad
+            param.grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0)
+            # param.grad -= self.lr * grad
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        if self.scheduler:
+            self.scheduler.step()
         self.processed += self.k
-        del grad
 
     def queue_acc(self):
         weights = []
@@ -329,16 +339,18 @@ class TestServer(object):
         self.queue.put_nowait(itr)
         # return self.k_adap_power
 
-    async def valid_consumer(self, get_testset, get_augment, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None):
+    async def valid_consumer(self, get_testset, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None, get_augment=None):
         testset = get_testset(self.device.type)
-        self.augment = get_augment()
-        torch.set_num_threads(4)
+        # self.augment = get_augment()
         if self.device.type == 'cpu':
             batch_size = 128
+            threads = 4
         else:
-            batch_size = 4096
+            batch_size = 256
+            threads = 16
+        torch.set_num_threads(threads)
 
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=False)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=threads, shuffle=False)
         self.loader_len = len(test_loader)
         #print(self.loader_len)
         if self.drift:
@@ -420,9 +432,9 @@ class TestServer(object):
 
     def get_acc(self, test_loader):
         def compute_acc(inputs, targets, top1):
-            inputs = self.augment(inputs.to(self.device))
+            # inputs = self.augment(inputs.to(self.device))
             targets = targets.to(self.device)
-            outputs = self.net(inputs)
+            outputs = self.net(inputs.to(self.device))
             l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
@@ -451,8 +463,9 @@ class TestServer(object):
             #print(self.drift_map)
             #print(count)
         else:
-            for i, (inputs, targets) in enumerate(test_loader):
-                loss += compute_acc(inputs, self.drift_map[targets], top1)
+            with autocast(device_type=self.device.type):
+                for i, (inputs, targets) in enumerate(test_loader):
+                    loss += compute_acc(inputs, self.drift_map[targets], top1)
         return top1.avg.item(), loss, top1.count
     
     def terminate(self):
@@ -466,13 +479,13 @@ class TestServer(object):
 @ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
-    def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, lr=0.03, opt='sgd', drift={}):
+    def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, drift={}):
         self.worker_index = worker_index
         self.ps = ps
         self.curritr = 0
         self.batches = {}
         self.B = B
-        self.lr = lr
+        # self.lr = lr
         self.queue = asyncio.Queue()
         self.training = False
         self.batch_eps = 0
@@ -490,10 +503,10 @@ class Worker(object):
         self.time_scale = time_scale
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net = Net(classes).to(self.device)
-        if opt == 'adam':
-            self.optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08)
-        else:
-            self.optimizer = optim.SGD(self.net.parameters(), lr=lr, momentum=0, weight_decay=5e-4)
+        # if opt == 'adam':
+        #     self.optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08)
+        # else:
+        self.optimizer = optim.SGD(self.net.parameters(), lr=0.005, momentum=0, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.accs = []
         print("worker {} init with device {}".format(self.worker_index, self.device))
@@ -510,11 +523,16 @@ class Worker(object):
         self.B = b
         return True
 
-    async def batch_producer(self, get_trainset, get_augment, t=0.001, mask=None):
+    async def batch_producer(self, get_trainset, get_augment=None, t=0.001, mask=None):
         #print(self.worker_index, 1/t, t)
-        torch.set_num_threads(4)
+        if self.device.type == 'cpu':
+            threads = 4
+        else:
+            threads = 16
+        torch.set_num_threads(threads)
+
         trainset = get_trainset(self.worker_index)
-        self.augment = get_augment()
+        # self.augment = get_augment()
         i = 0
         # ADD SAMPLER HERE
         if self.drift:
@@ -532,8 +550,9 @@ class Worker(object):
                 self.drift_weights[self.drift_mask_n_all] = 0
                 self.sampler = torch.utils.data.WeightedRandomSampler(self.drift_weights, self.B)
                 self.train_loader = torch.utils.data.DataLoader(trainset,
-                                                                collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
+                                                                # collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
                                                                 batch_size=self.B,
+                                                                num_workers=threads,
                                                                 sampler=self.sampler)
                 self.drift_map = torch.from_numpy(mask[1]).long()
                 #print(self.drift_weights.size, self.drift_mask_p.size, self.drift_mask_n.size)
@@ -542,8 +561,9 @@ class Worker(object):
                 traceback.print_exc()
         else:
             self.train_loader = torch.utils.data.DataLoader(trainset,
-                                                            collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
+                                                            # collate_fn=lambda x: tuple(x_.to(self.device) for x_ in torch.utils.data.dataloader.default_collate(x)),
                                                             batch_size=self.B,
+                                                            num_workers=threads,
                                                             shuffle=True)
             self.drift_map = torch.from_numpy(self.drift_map).long().to(self.device)
         self.iterator = iter(self.train_loader)
@@ -608,6 +628,9 @@ class Worker(object):
 
         for i, param in enumerate(self.net.parameters()):
             param.data = weights[i].to(self.device)
+        # if self.worker_index == 0:
+        #     print("runtime {}A: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
 
         try:
             data, target = next(self.iterator)
@@ -615,29 +638,23 @@ class Worker(object):
             self.iterator = iter(self.train_loader)
             data, target = next(self.iterator)
         # if self.worker_index == 0:
-        #     print("runtime {}A: {}".format(itr, time.time() - chkpt))
+        #     print("runtime {}B: {}".format(itr, time.time() - chkpt))
         #     chkpt = time.time()
         #print(self.worker_index, target, self.drift_map)
         map_target = self.drift_map[target]
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
-        # if self.worker_index == 0:
-        #     print("runtime {}B: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        self.net.train()
-        aug_data = self.augment(data.to(self.device))
-        # if self.worker_index == 0:
-        #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        output = self.net(aug_data)
-        # if self.worker_index == 0:
-        #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        #print(self.worker_index, output.shape)
-        #if torch.isnan(output).any():
-            #print(output, target)
-            #print(torch.isnan(data).any())
-        #print("target to device")
-        loss = self.criterion(output, map_target.to(self.device))
+        with autocast(device_type=self.device.type):
+            self.net.train()
+            # aug_data = self.augment(data.to(self.device))
+            # if self.worker_index == 0:
+            #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
+            #     chkpt = time.time()
+            output = self.net(data.to(self.device))
+            # if self.worker_index == 0:
+            #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
+            #     chkpt = time.time()
+            #print("target to device")
+            loss = self.criterion(output, map_target.to(self.device))
         # print(self.worker_index, "loss:", loss.shape)
         # if self.worker_index == 0:
         #     print("runtime {}E: {}".format(itr, time.time() - chkpt))
@@ -652,11 +669,11 @@ class Worker(object):
         for param in self.net.parameters():
             grads.append(param.grad.data)
 
-        del self.batches[itr], data, aug_data, target, map_target, output, loss
+        del self.batches[itr], data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
         # if self.worker_index == 0:
-            # print("runtime {}G: {}".format(itr, time.time() - chkpt))
-            # print("runtime {} total: {}".format(itr, time.time() - batch_start))
+        #     print("runtime {}G: {}".format(itr, time.time() - chkpt))
+        #     print("runtime {} total: {}".format(itr, time.time() - batch_start))
         return grads
 
     def preempt(self):
@@ -699,8 +716,6 @@ class Coordinator(object):
                                               self.Net,
                                               self.args.time_scale,
                                               B=self.args.bs,
-                                              lr=self.args.lr,
-                                              opt=self.args.optimizer,
                                               drift=drift))
         self.group = create_collective_group([self.ts, self.pr, self.ps] + self.workers, backend="torch_gloo")
         self.processes = []

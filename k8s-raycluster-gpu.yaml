@@ -58,9 +58,9 @@ spec:
   workerGroupSpecs:
   # the pod replicas in this group typed worker
   - groupName: doll-w
-    replicas: 8
-    minReplicas: 8
-    maxReplicas: 8
+    replicas: 16
+    minReplicas: 16
+    maxReplicas: 16
     # logical group name, for this called small-group, also can be functional
     
     rayStartParams: {}

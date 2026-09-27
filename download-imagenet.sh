@@ -1,10 +1,10 @@
-# for pod in `kubectl get pods -o=name | grep raycluster | sed "s/^.\{4\}//"`
-# do
-#     kubectl exec $pod -- mkdir -p spot_aws/data/ImageNet
-#     kubectl exec $pod -- curl -L -o spot_aws/data/ImageNet/dataset.zip --header "Authorization: Bearer $(jq -r .key ~/.kaggle/kaggle.json)" "https://www.kaggle.com/api/v1/datasets/download/mayurmadnani/imagenet-dataset" &
-# done
+for pod in `kubectl get pods -o=name | grep raycluster | sed "s/^.\{4\}//"`
+do
+    kubectl exec $pod -- mkdir -p spot_aws/data/ImageNet
+    kubectl exec $pod -- curl -L -o spot_aws/data/ImageNet/dataset.zip --header "Authorization: Bearer $(jq -r .key ~/.kaggle/kaggle.json)" "https://www.kaggle.com/api/v1/datasets/download/mayurmadnani/imagenet-dataset" &
+done
 
-# wait
+wait
 
 for pod in `kubectl get pods -o=name | grep raycluster | sed "s/^.\{4\}//"`
 do

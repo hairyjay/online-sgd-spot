@@ -4,6 +4,7 @@ import numpy.random as random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 import torchvision
 from torchvision import datasets, transforms
 
@@ -47,13 +48,19 @@ class CIFARShards(shards.Shards):
             print("DEFAULT -- setting target to {}".format(self.args.target))
 
     def testset(self):
-        return torchvision.datasets.CIFAR10(root='~/spot_aws/data',
+        return datasets.CIFAR10(root='~/spot_aws/data',
                                             train=False,
                                             download=True,
                                             transform=self.test_transform)
 
     def trainset(self, idx=None):
-        return torchvision.datasets.CIFAR10(root='~/spot_aws/data',
+        return datasets.CIFAR10(root='~/spot_aws/data',
                                             train=True,
                                             download=True,
                                             transform=self.train_transform), False
+
+    def get_scheduler(self, parameters):
+        if self.args.optimizer == 'adam':
+            return optim.Adam(parameters, lr=self.args.lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08), None
+        else:
+            return optim.SGD(parameters, lr=self.args.lr, momentum=0, weight_decay=5e-4), None

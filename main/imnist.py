@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
 from kornia.morphology import erosion, dilation
@@ -72,6 +73,12 @@ class InfiMNISTShards(shards.Shards):
             return torch.squeeze(erosion(image, kernel=kernel), 0)
         else:
             return torch.squeeze(dilation(image, kernel=kernel), 0)
+
+    def get_scheduler(self, parameters):
+        if self.args.optimizer == 'adam':
+            return optim.Adam(parameters, lr=self.args.lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08), None
+        else:
+            return optim.SGD(parameters, lr=self.args.lr, momentum=0, weight_decay=5e-4), None
         
     def fill_nan(self, image:torch.Tensor) -> torch.Tensor:
         return torch.nan_to_num(image, nan=self.norm_min)

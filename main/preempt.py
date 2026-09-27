@@ -12,6 +12,7 @@ from . import rates
 from . import cifar
 from . import emnist
 from . import imnist
+from . import imageresnet
 
 ##################################################################
 # Start ray cluster
@@ -87,7 +88,9 @@ if __name__ == "__main__":
     stats["rate_dist"] = rate_dist.get_stats()
 
     # INITIALIZE WORKERS AND PARAMETER SERVER
-    if args.dataset == "cifar":
+    if args.dataset == "imagenet":
+        experiment = imageresnet.ImageResNetShards(args, pricing, drift)
+    elif args.dataset == "cifar":
         experiment = cifar.CIFARShards(args, pricing, drift)
     elif args.dataset == "imnist":
         experiment = imnist.InfiMNISTShards(args, pricing, drift)

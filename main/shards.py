@@ -52,16 +52,19 @@ class Shards(actors.Coordinator):
     def get_train_augment(self):
         pass
 
+    def get_scheduler(self, parameters):
+        pass
+
     def run(self, start_time, allocation, rate_dist=None, adaptive=False):
         t = [self.args.t] * self.args.size
         l = 1 / self.args.t
         if rate_dist is not None:
             t, l = rate_dist.get_t(self.args.size)
 
-        self.processes.append(self.ps.queue_consumer.remote(self.workers, start_time))
+        self.processes.append(self.ps.queue_consumer.remote(self.workers, start_time, self.get_scheduler))
         self.processes.append(self.pr.price_producer.remote(self.workers, start_time, l, allocation, self.args.adap))
         self.processes.append(self.ts.valid_consumer.remote(self.get_testset,
-                                                            self.get_test_augment,
+                                                            # self.get_test_augment,
                                                             start_time,
                                                             expected_itr=self.args.J,
                                                             target_acc=self.args.target,
@@ -71,11 +74,11 @@ class Shards(actors.Coordinator):
         print("ready to start batch_producer tasks")
 
         for i, w in enumerate(self.workers):
-            self.processes.extend([w.batch_producer.remote(self.get_trainset,
-                                                           self.get_train_augment,
-                                                           t=t[i],
-                                                           mask=self.drift_mask),
-                                   w.batch_consumer.remote(start_time)])
+            self.processes.extend([w.batch_producer.remote( self.get_trainset,
+                                                            # self.get_train_augment,
+                                                            t=t[i],
+                                                            mask=self.drift_mask),
+                                                            w.batch_consumer.remote(start_time)])
 
     def autoexit(self):
         if self.args.autoexit:

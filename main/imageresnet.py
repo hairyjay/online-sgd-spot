@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
 from torchvision import datasets, transforms
 from torchvision.transforms import v2
 import torchvision.models as models
@@ -30,11 +31,19 @@ class ImageResNetShards(shards.Shards):
         # self.norm_std = 0.3081
         # self.norm_min = -0.42421296
         self.train_transform = transforms.Compose([
-                               transforms.ToTensor(),
-                               v2.Lambda(self.rand_thicken),
+                                transforms.ToTensor(),
+                                transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
+                                transforms.RandomHorizontalFlip(0.5),
+                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
+                                v2.RandomPerspective(),
+                                v2.RandomAffine(30, translate=(0.1, 0.1)),
+                                transforms.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225])
         ])
         self.test_transform = transforms.Compose([
-                               transforms.ToTensor()
+                                transforms.ToTensor(),
+                                transforms.Resize(size=256, antialias=True),
+                                transforms.CenterCrop(224),
+                                transforms.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
     def testset(self):
@@ -43,24 +52,38 @@ class ImageResNetShards(shards.Shards):
 
     def trainset(self, idx=None):
         return datasets.ImageFolder(root='~/spot_aws/data/ImageNet/train',
-                                            transform=self.test_transform)
+                                            transform=self.train_transform), True
 
-    def get_test_augment(self):
-        return torch.nn.Sequential(
-            v2.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225])
-            v2.Lambda(self.fill_nan)
-        )
+    # def get_test_augment(self):
+    #     return torch.nn.Sequential(
+    #         transforms.Resize(size=256, antialias=True),
+    #         transforms.CenterCrop(224),
+    #         v2.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225]),
+    #         v2.Lambda(self.fill_nan)
+    #     )
     
-    def get_train_augment(self):
-        return torch.nn.Sequential(
-            v2.ElasticTransform(alpha=30.0, sigma=3.0),
-            v2.RandomPerspective(),
-            v2.RandomAffine(30, translate=(0.1, 0.1)),
-            transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
-            transforms.RandomHorizontalFlip(0.5),
-            v2.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225])
-            v2.Lambda(self.fill_nan)
+    # def get_train_augment(self):
+    #     return torch.nn.Sequential(
+    #         transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
+    #         transforms.RandomHorizontalFlip(0.5),
+    #         v2.ElasticTransform(alpha=30.0, sigma=3.0),
+    #         v2.RandomPerspective(),
+    #         v2.RandomAffine(30, translate=(0.1, 0.1)),
+    #         v2.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225]),
+    #         v2.Lambda(self.fill_nan)
+    #     )
+
+    def get_scheduler(self, parameters):
+        optimizer = optim.SGD(parameters, lr=0.007, momentum=0.9, weight_decay=1e-4)
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=0.175,
+            total_steps=30*1281167,
+            pct_start=0.3,
+            div_factor=25.0,
+            final_div_factor=1e-4
         )
+        return optimizer, scheduler
     
 
     def rand_thicken(self, image:torch.Tensor) -> torch.Tensor:
