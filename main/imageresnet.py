@@ -25,7 +25,7 @@ class ImageResNetShards(shards.Shards):
         self.classes = 1000
         super().__init__(args, pricing, drift, classes=self.classes)
         if self.args.target == 0:
-            self.args.target = 0.90
+            self.args.target = 0.60
             print("DEFAULT -- setting target to {}".format(self.args.target))
         # self.norm_mean = 0.1307
         # self.norm_std = 0.3081
@@ -34,9 +34,9 @@ class ImageResNetShards(shards.Shards):
                                 transforms.ToTensor(),
                                 transforms.RandomResizedCrop(224, interpolation=transforms.InterpolationMode.BILINEAR, antialias=True),
                                 transforms.RandomHorizontalFlip(0.5),
-                                v2.ElasticTransform(alpha=30.0, sigma=3.0),
-                                v2.RandomPerspective(),
-                                v2.RandomAffine(30, translate=(0.1, 0.1)),
+                                # v2.ElasticTransform(alpha=30.0, sigma=3.0),
+                                # v2.RandomPerspective(),
+                                # v2.RandomAffine(30, translate=(0.1, 0.1)),
                                 transforms.Normalize(mean=[0.485, 0.485, 0.406], std=[0.229, 0.224, 0.225])
         ])
         self.test_transform = transforms.Compose([
@@ -74,15 +74,16 @@ class ImageResNetShards(shards.Shards):
     #     )
 
     def get_scheduler(self, parameters):
-        optimizer = optim.SGD(parameters, lr=0.007, momentum=0.9, weight_decay=1e-4)
+        optimizer = optim.SGD(parameters, lr=0.000005, momentum=0.9, weight_decay=1e-4)
         scheduler = optim.lr_scheduler.OneCycleLR(
             optimizer,
-            max_lr=0.175,
-            total_steps=30*1281167,
+            max_lr=0.0001,
+            total_steps=50*(1281167//(self.args.bs*self.args.K)),
             pct_start=0.3,
-            div_factor=25.0,
+            div_factor=20.0,
             final_div_factor=1e-4
         )
+        print("total steps per \"epoch\": {}".format(1281167//(self.args.bs)))
         return optimizer, scheduler
     
 

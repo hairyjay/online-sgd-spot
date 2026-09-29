@@ -5,8 +5,8 @@ import time
 
 import torch
 import torch.optim as optim
-#import torch.distributed as dist
-#import torch.multiprocessing as mp
+
+from torch.nn import DataParallel
 
 from . import data_tools
 from . import shards
@@ -73,6 +73,7 @@ class ParameterServer(object):
         self.start_time = start_time
         self.arrival_count = np.zeros(len(self.workers))
         self.optimizer, self.scheduler = opt(self.net.parameters())
+        print(self.optimizer, self.scheduler)
 
         # CLEAR QUEUE AFTER CALIBRATION
         while not self.training:
@@ -112,7 +113,7 @@ class ParameterServer(object):
             self.pr.count_signal.remote(self.arrival_count, self.processed, group_start - self.start_time)
 
             if self.processed % self.t == 0:
-                print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
+                print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}; LR = {}".format(self.processed, self.update_time[-1][1], self.queue.qsize(), self.scheduler.get_last_lr()[0]))
                 self.queue_acc()
             
             await asyncio.sleep(0)
@@ -313,8 +314,11 @@ class TestServer(object):
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.world_size = torch.cuda.device_count()
         self.is_testset_list = False
         self.net = Net(classes).to(self.device)
+        if self.device.type == 'cuda' and self.world_size > 1:
+            self.net = DataParallel(self.net.cuda())
         self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
 
         self.k_adap = k_adap
@@ -328,7 +332,7 @@ class TestServer(object):
         self.sampler = None
         self.loader_len = 0
         self.training = False
-        print("test server init on device {}".format(self.device))
+        print("test server init on device {} with {} devices".format(self.device, self.world_size))
     
     def ready_signal(self):
         self.training = True
@@ -346,8 +350,8 @@ class TestServer(object):
             batch_size = 128
             threads = 4
         else:
-            batch_size = 256
-            threads = 48
+            batch_size = 256 * self.world_size
+            threads = 12 * self.world_size
         torch.set_num_threads(threads)
 
         test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=threads, shuffle=False)
@@ -383,7 +387,7 @@ class TestServer(object):
                 break
             test_start = time.time()
             test_time = test_start - start_time
-            print(test_time)
+            # print(test_time)
             if self.drift:
                 for i, start in enumerate(self.drift["start"]):
                     if test_time > start:
@@ -657,6 +661,7 @@ class Worker(object):
             loss = self.criterion(output, map_target.to(self.device))
         # print(self.worker_index, "loss:", loss.shape)
         # if self.worker_index == 0:
+        #     print(loss.item())
         #     print("runtime {}E: {}".format(itr, time.time() - chkpt))
         #     chkpt = time.time()
         self.optimizer.zero_grad()
