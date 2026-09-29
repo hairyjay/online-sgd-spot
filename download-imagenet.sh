@@ -8,8 +8,11 @@ wait
 
 for pod in `kubectl get pods -o=name | grep raycluster | sed "s/^.\{4\}//"`
 do
+    kubectl exec $pod -- rm -rf train
+    kubectl exec $pod -- rm -rf test
+    kubectl exec $pod -- rm -rf val
     kubectl exec $pod -- sudo apt-get install unzip
-    kubectl exec $pod -- unzip spot_aws/data/ImageNet/dataset.zip &
+    kubectl exec $pod -- unzip -o spot_aws/data/ImageNet/dataset.zip &
 done
 
 wait

@@ -304,7 +304,7 @@ class PriceServer(object):
 # test server
 ##################################################################
 
-@ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=45, num_gpus=4) #GPU MODEL
 #@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net, classes, k_adap=False, drift={}):
@@ -347,7 +347,7 @@ class TestServer(object):
             threads = 4
         else:
             batch_size = 256
-            threads = 16
+            threads = 48
         torch.set_num_threads(threads)
 
         test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=threads, shuffle=False)
@@ -476,7 +476,7 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=5, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
     def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, drift={}):
