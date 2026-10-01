@@ -144,10 +144,13 @@ class ParameterServer(object):
         #     if nan_detected:
         #         print("Warning: NaN gradients detected!")
         self.net.train()
+        if self.processed == (self.k * 8):
+            for p in self.net.state_dict():
+                print(p)
         for i, param in enumerate(self.net.parameters()):
             param.grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0).clone()
-            if self.processed == (self.k * 32):
-                print("Batch {} Layer {}: Norm = {}".format(self.processed, i, param.grad.norm().item()))
+            # if self.processed == (self.k * 8):
+            #     print("Batch {} Layer {}: Norm = {}".format(self.processed, i, param.grad.norm().item()))
             # param.grad -= self.lr * grad
         # if self.processed == (self.k):
         #     # print("param grad exists: {}".format(True if self.net.parameters()[0].grad else False))
@@ -480,10 +483,10 @@ class TestServer(object):
     def get_acc(self, net, test_loader):
         def compute_acc(net, inputs, targets, top1):
             # inputs = self.augment(inputs.to(self.device))
-            # with autocast(device_type=self.device.type):
-            targets = targets.to(self.device)
-            outputs = net(inputs.to(self.device))
-            l = self.criterion(outputs, targets)
+            with autocast(device_type=self.device.type):
+                targets = targets.to(self.device)
+                outputs = net(inputs.to(self.device))
+                l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
             del outputs
@@ -694,17 +697,17 @@ class Worker(object):
         self.optimizer.zero_grad()
         self.net.train()
 
-        # with autocast(device_type=self.device.type):
-        # aug_data = self.augment(data.to(self.device))
-        # if self.worker_index == 0:
-        #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        output = self.net(data.to(self.device))
-        # if self.worker_index == 0:
-        #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        #print("target to device")
-        loss = self.criterion(output, map_target.to(self.device))
+        with autocast(device_type=self.device.type):
+            # aug_data = self.augment(data.to(self.device))
+            # if self.worker_index == 0:
+            #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
+            #     chkpt = time.time()
+            output = self.net(data.to(self.device))
+            # if self.worker_index == 0:
+            #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
+            #     chkpt = time.time()
+            #print("target to device")
+            loss = self.criterion(output, map_target.to(self.device))
 
         # print(self.worker_index, "loss:", loss.shape)
         if self.worker_index == 0 and itr % 25 == 0:

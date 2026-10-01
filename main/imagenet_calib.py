@@ -29,14 +29,41 @@ class Params:
         # self.lr_step_size = 30
         # self.lr_gamma = 0.1
 
+# class Net(nn.Module):
+#     def __init__(self, classes):
+#         super().__init__()
+#         self.model = models.resnet50(weights=None)
+#         self.model.fc = nn.Linear(self.model.fc.in_features, classes)
+
+#     def forward(self, x):
+#         return self.model(x)
+
 class Net(nn.Module):
     def __init__(self, classes):
         super().__init__()
         self.model = models.resnet50(weights=None)
-        self.model.fc = nn.Linear(self.model.fc.in_features, classes)
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        for m in self.model.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.weight.requires_grad_(False)
+                m.bias.requires_grad_(False)
+        # self.features = torch.nn.Sequential(*list(model.children()))
+        # print(self.features)
+
+    def train(self, mode=True):
+        """
+        Override the default train() to freeze the BN parameters
+        """
+        super().train(mode)
+        for m in self.model.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+                m.weight.requires_grad = False
+                m.bias.requires_grad = False
 
     def forward(self, x):
         return self.model(x)
+        # return self.features(x)
 
 def train(params, train_loader, test_loader, model, loss_fn, optimizer, epoch):
     model.train()
@@ -63,8 +90,9 @@ def train(params, train_loader, test_loader, model, loss_fn, optimizer, epoch):
         optimizer.step()
         scheduler.step()
         if batch_idx % 250 == 125:
-            for i, param in enumerate(model.parameters()):
-                print("Epoch {} Batch {} Layer {}: Norm = {}".format(epoch, batch_idx, i, linalg.norm(param.grad.data).item()))
+            print("Epoch {} Batch {}".format(epoch, batch_idx))
+            # for i, param in enumerate(model.parameters()):
+            #     print("Epoch {} Batch {} Layer {}: Norm = {}".format(epoch, batch_idx, i, linalg.norm(param.grad.data).item()))
         optimizer.zero_grad()
         # print("{}C: {:.2f}s".format(batch_idx, time.time()-chkpt))
 
