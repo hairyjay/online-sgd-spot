@@ -16,11 +16,18 @@ class Params:
         self.world_size = torch.cuda.device_count()
         self.batch_size = 256 * self.world_size
         self.workers = 40
-        self.lr = 0.1
+        self.max_lr = 0.175
         self.momentum = 0.9
         self.weight_decay = 1e-4
-        self.lr_step_size = 30
-        self.lr_gamma = 0.1
+        self.epochs = 50
+        self.pct_start = 0.3
+        self.div_factor = 25.0
+        self.final_div_factor = 1e4
+        # self.lr = 0.1
+        # self.momentum = 0.9
+        # self.weight_decay = 1e-4
+        # self.lr_step_size = 30
+        # self.lr_gamma = 0.1
 
 class Net(nn.Module):
     def __init__(self, classes):
@@ -54,6 +61,7 @@ def train(params, train_loader, test_loader, model, loss_fn, optimizer, epoch):
         # Backpropagation
         loss.backward()
         optimizer.step()
+        scheduler.step()
         if batch_idx % 250 == 125:
             for i, param in enumerate(model.parameters()):
                 print("Epoch {} Batch {} Layer {}: Norm = {}".format(epoch, batch_idx, i, linalg.norm(param.grad.data).item()))
@@ -138,11 +146,21 @@ if __name__ == "__main__":
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(model.parameters(), 
-                                lr=params.lr, momentum=params.momentum, weight_decay=params.weight_decay)
+                                lr=params.max_lr/params.div_factor,#params.lr,
+                                momentum=params.momentum,
+                                weight_decay=params.weight_decay)
 
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=params.lr_step_size, gamma=params.lr_gamma)
+    steps_per_epoch = len(train_loader)
+    total_steps = params.epochs * steps_per_epoch
+    print("Steps per epoch: {}".format(steps_per_epoch))
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=params.lr_step_size, gamma=params.lr_gamma)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,
+                                                    max_lr=params.max_lr,
+                                                    total_steps=total_steps,
+                                                    pct_start=params.pct_start,
+                                                    div_factor=params.div_factor,
+                                                    final_div_factor=params.final_div_factor)
 
     for epoch in range(50):
         train(params, train_loader, test_loader, model, loss_fn, optimizer, epoch=epoch)
-        scheduler.step()
         test(params, test_loader, model, loss_fn, epoch, optimizer)

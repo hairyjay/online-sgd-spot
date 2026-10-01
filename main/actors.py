@@ -5,7 +5,6 @@ import time
 
 import torch
 import torch.optim as optim
-
 from torch.nn import DataParallel
 
 from . import data_tools
@@ -113,32 +112,80 @@ class ParameterServer(object):
             self.pr.count_signal.remote(self.arrival_count, self.processed, group_start - self.start_time)
 
             if self.processed % self.t == 0:
-                print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}; LR = {}".format(self.processed, self.update_time[-1][1], self.queue.qsize(), self.scheduler.get_last_lr()[0]))
+                if self.scheduler:
+                    print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}; LR = {}".format(self.processed, self.update_time[-1][1], self.queue.qsize(), self.scheduler.get_last_lr()[0]))
+                else:
+                    print("QUEUE SIZE AT BATCH {}, {:.0f}s: {}".format(self.processed, self.update_time[-1][1], self.queue.qsize()))
                 self.queue_acc()
             
             await asyncio.sleep(0)
 
     def apply_gradients(self, gradients):
-        # lr = None
-        # if type(self.lr) is int:
-        #     lr = self.lr
-        # else if :
-        #     lr = 
+        # if self.processed == (self.k):
+        #     for g in gradients:
+        #         print([tens.shape for tens in g])
+        #     # print("param grad exists: {}".format(True if self.net.parameters()[0].grad else False))
+
+        #     max_grad_norm = 0.0
+        #     min_grad_norm = float('inf')
+        #     nan_detected = False
+        #     for param in self.net.parameters():
+        #         if param.grad is not None:
+        #             grad_norm = param.grad.norm().item()
+        #             if torch.isnan(param.grad).any():
+        #                 nan_detected = True
+        #                 print(f"NaN gradient detected in parameter: {param.size()}")
+        #             max_grad_norm = max(max_grad_norm, grad_norm)
+        #             min_grad_norm = min(min_grad_norm, grad_norm)
+        #             print(param.size(), grad_norm)
+
+        #     print(f"Max gradient norm: {max_grad_norm:.4e}")
+        #     print(f"Min gradient norm: {min_grad_norm:.4e}")
+        #     if nan_detected:
+        #         print("Warning: NaN gradients detected!")
+        self.net.train()
         for i, param in enumerate(self.net.parameters()):
-            param.grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0)
+            param.grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0).clone()
+            if self.processed == (self.k * 32):
+                print("Batch {} Layer {}: Norm = {}".format(self.processed, i, param.grad.norm().item()))
             # param.grad -= self.lr * grad
+        # if self.processed == (self.k):
+        #     # print("param grad exists: {}".format(True if self.net.parameters()[0].grad else False))
+        #     # if self.net.parameters()[0].grad:
+        #     print("grad shape after gathering")
+        #     print([param.grad.shape for param in self.net.parameters()])
+
+        #     max_grad_norm = 0.0
+        #     min_grad_norm = float('inf')
+        #     nan_detected = False
+        #     for param in self.net.parameters():
+        #         if param.grad is not None:
+        #             grad_norm = param.grad.norm().item()
+        #             if torch.isnan(param.grad).any():
+        #                 nan_detected = True
+        #                 print(f"NaN gradient detected in parameter: {param.size()}")
+        #             max_grad_norm = max(max_grad_norm, grad_norm)
+        #             min_grad_norm = min(min_grad_norm, grad_norm)
+        #             print(param.size(), param.grad.size(), grad_norm)
+
+        #     print(f"Max gradient norm: {max_grad_norm:.4e}")
+        #     print(f"Min gradient norm: {min_grad_norm:.4e}")
+        #     if nan_detected:
+        #         print("Warning: NaN gradients detected!")
         self.optimizer.step()
-        self.optimizer.zero_grad()
         if self.scheduler:
             self.scheduler.step()
         self.processed += self.k
+        self.optimizer.zero_grad()
 
     def queue_acc(self):
+        self.net.eval()
         weights = []
-        for param in self.net.parameters():
-            weights.append(param.data)
+        # for param in self.net.parameters():
+        #     weights.append(param.data)
+        w_ref = ray.put(self.net)
 
-        ref = self.ts.test_acc.remote(weights, self.processed)
+        ref = self.ts.test_acc.remote(w_ref, self.processed)
         # self.k_adap_power = ray.get(ref)
         # self.k_eff = self.k * (2**self.k_adap_power)
         # print("K: ", self.k, self.k_eff, self.k_adap_power)
@@ -316,14 +363,8 @@ class TestServer(object):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.world_size = torch.cuda.device_count()
         self.is_testset_list = False
-        self.net = Net(classes).to(self.device)
-        if self.device.type == 'cuda' and self.world_size > 1:
-            self.net = DataParallel(self.net.cuda())
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='sum')
-
-        self.k_adap = k_adap
-        self.k_adap_power = 0
-        self.last_k_adap = 0
+        self.net = Net(classes)
+        self.criterion = torch.nn.CrossEntropyLoss()
 
         self.drift = drift
         self.drift_weights = None
@@ -341,7 +382,6 @@ class TestServer(object):
     def test_acc(self, weights, itr):
         self.weights[itr] = weights
         self.queue.put_nowait(itr)
-        # return self.k_adap_power
 
     async def valid_consumer(self, get_testset, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None, get_augment=None):
         testset = get_testset(self.device.type)
@@ -350,11 +390,14 @@ class TestServer(object):
             batch_size = 128
             threads = 4
         else:
-            batch_size = 256 * self.world_size
+            batch_size = 128 * self.world_size
             threads = 12 * self.world_size
         torch.set_num_threads(threads)
 
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, num_workers=threads, shuffle=False)
+        test_loader = torch.utils.data.DataLoader(testset,
+                                                  batch_size=batch_size,
+                                                  num_workers=threads,
+                                                  shuffle=False)
         self.loader_len = len(test_loader)
         #print(self.loader_len)
         if self.drift:
@@ -398,13 +441,20 @@ class TestServer(object):
                             self.drift_weights[self.drift_mask_p[i]] = 1 - (test_time - start) / self.drift["time"][i]
                             self.drift_weights[self.drift_mask_n[i]] = (test_time - start) / self.drift["time"][i]
                         self.sampler.weights = torch.as_tensor(self.drift_weights)
-            for i, param in enumerate(self.net.parameters()):
-                param.data = self.weights[itr][i].to(self.device)
-            del self.weights[itr]
+            
+            # for i, param in enumerate(self.net.parameters()):
+            #     param.data = self.weights[itr][i].clone()
+            # dist_net = self.net.to(self.device)
+            dist_net = self.weights[itr].to(self.device)
+            if self.device.type == 'cuda' and self.world_size > 1:
+                dist_net = DataParallel(dist_net.cuda())
+            # is_nan = torch.stack([torch.isnan(p).any() for p in self.net.parameters()]).any()
+            # print(is_nan)
 
             self.processed = itr
-            acc, loss, count = self.get_acc(test_loader)
-            print("AFTER {} BATCHES: {:.2f}% ACC; {:.0f} LOSS; {:.0f} COUNT".format(self.processed, acc, loss, count))
+            acc, loss, count = self.get_acc(dist_net, test_loader)
+            del self.weights[itr], dist_net
+            print("AFTER {} BATCHES: {:.2f}% ACC; {:.4f} LOSS; {:.0f} COUNT".format(self.processed, acc, loss, count))
             accuracy.append([self.processed, acc, loss])
 
             if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):
@@ -423,29 +473,23 @@ class TestServer(object):
                     self.target_itr = self.processed
                     print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_10_acc))
 
-            if self.k_adap and len(accuracy) > self.last_k_adap + 20:
-                last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
-                last_20_acc = np.mean(np.array([a[1] for a in accuracy[-20:-11]]))
-                if last_20_acc > last_10_acc:
-                    self.k_adap_power += 1
-                    self.last_k_adap = len(accuracy)
-
             print("TEST TIME: {}".format(time.time() - test_start))
 
         return 'ts', np.array(accuracy)
 
-    def get_acc(self, test_loader):
-        def compute_acc(inputs, targets, top1):
+    def get_acc(self, net, test_loader):
+        def compute_acc(net, inputs, targets, top1):
             # inputs = self.augment(inputs.to(self.device))
+            # with autocast(device_type=self.device.type):
             targets = targets.to(self.device)
-            outputs = self.net(inputs.to(self.device))
+            outputs = net(inputs.to(self.device))
             l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
             del outputs
             #a = time.time()
             return l.item()
-        self.net.eval()
+        net.eval()
         top1 = data_tools.AverageMeter()
         loss = 0
         if self.drift:
@@ -467,9 +511,9 @@ class TestServer(object):
             #print(self.drift_map)
             #print(count)
         else:
-            with autocast(device_type=self.device.type):
-                for i, (inputs, targets) in enumerate(test_loader):
-                    loss += compute_acc(inputs, self.drift_map[targets], top1)
+            for i, (inputs, targets) in enumerate(test_loader):
+                loss += compute_acc(net, inputs, self.drift_map[targets], top1)
+            loss /= i
         return top1.avg.item(), loss, top1.count
     
     def terminate(self):
@@ -647,24 +691,26 @@ class Worker(object):
         #print(self.worker_index, target, self.drift_map)
         map_target = self.drift_map[target]
         #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
-        with autocast(device_type=self.device.type):
-            self.net.train()
-            # aug_data = self.augment(data.to(self.device))
-            # if self.worker_index == 0:
-            #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
-            #     chkpt = time.time()
-            output = self.net(data.to(self.device))
-            # if self.worker_index == 0:
-            #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
-            #     chkpt = time.time()
-            #print("target to device")
-            loss = self.criterion(output, map_target.to(self.device))
-        # print(self.worker_index, "loss:", loss.shape)
+        self.optimizer.zero_grad()
+        self.net.train()
+
+        # with autocast(device_type=self.device.type):
+        # aug_data = self.augment(data.to(self.device))
         # if self.worker_index == 0:
-        #     print(loss.item())
+        #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
+        output = self.net(data.to(self.device))
+        # if self.worker_index == 0:
+        #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
+        #     chkpt = time.time()
+        #print("target to device")
+        loss = self.criterion(output, map_target.to(self.device))
+
+        # print(self.worker_index, "loss:", loss.shape)
+        if self.worker_index == 0 and itr % 25 == 0:
+            print(loss.item())
         #     print("runtime {}E: {}".format(itr, time.time() - chkpt))
         #     chkpt = time.time()
-        self.optimizer.zero_grad()
         loss.backward()
         # if self.worker_index == 0:
         #     print("runtime {}F: {}".format(itr, time.time() - chkpt))
