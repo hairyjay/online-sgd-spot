@@ -21,10 +21,7 @@ from torch.amp import autocast
 class ParameterServer(object):
     def __init__(self, classes, Net, ts, pr, size, time_scale, k=5, t=100, B=256):
         self.params = 0
-        # self.lr = lr
         self.k = k
-        # self.k_eff = k
-        # self.k_adap_power = 0
         self.t = t
         self.b = B
         self.queue = asyncio.Queue()
@@ -103,16 +100,11 @@ class ParameterServer(object):
 
             group_start = time.time()
 
-            # weights = []
-            # for param in self.net.parameters():
-            #     weights.append(param.data)
-            # w_ref = ray.put(weights)
             s_ref = ray.put(self.net.state_dict())
-
             states = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(s_ref, b[1]) for b in batches])
-
             self.apply_gradients(states)
             del batches, s_ref, states
+
             self.arrival_time.append([self.processed, group_start - self.start_time])
             self.gradient_time.append([self.processed, time.time() - group_start])
             self.update_time.append([self.processed, time.time() - self.start_time])
@@ -131,9 +123,7 @@ class ParameterServer(object):
         gradients = [s[0] for s in states]
         bn_states = [s[1] for s in states]
         self.net.train()
-        # if self.processed == (self.k * 8):
-        #     for p in self.net.state_dict():
-        #         print(p)
+
         new_bn_states = {}
         state_dict = self.net.state_dict()
         for k in self.batchnorm_track:
@@ -157,15 +147,8 @@ class ParameterServer(object):
 
     def queue_acc(self):
         self.net.eval()
-        # weights = []
-        # for param in self.net.parameters():
-        #     weights.append(param.data)
         s_ref = ray.put(self.net.state_dict())
-
         ref = self.ts.test_acc.remote(s_ref, self.processed)
-        # self.k_adap_power = ray.get(ref)
-        # self.k_eff = self.k * (2**self.k_adap_power)
-        # print("K: ", self.k, self.k_eff, self.k_adap_power)
         del ref
 
     def terminate(self):
@@ -651,47 +634,22 @@ class Worker(object):
 
     def compute_gradients(self, state, itr):
         batch_start = time.time()
-        # chkpt = batch_start
-
         self.net.load_state_dict(state)
-        # for i, param in enumerate(self.net.parameters()):
-        #     param.data = weights[i].to(self.device)
 
         try:
             data, target = next(self.iterator)
         except StopIteration:
             self.iterator = iter(self.train_loader)
             data, target = next(self.iterator)
-        # if self.worker_index == 0:
-        #     print("runtime {}B: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
-        #print(self.worker_index, target, self.drift_map)
         map_target = self.drift_map[target]
-        #with torch.autograd.detect_anomaly(): #CHECK FOR ANOMALY
         self.optimizer.zero_grad()
         self.net.train()
 
         with autocast(device_type=self.device.type):
-            # aug_data = self.augment(data.to(self.device))
-            # if self.worker_index == 0:
-            #     print("runtime {}C: {}".format(itr, time.time() - chkpt))
-            #     chkpt = time.time()
             output = self.net(data.to(self.device))
-            # if self.worker_index == 0:
-            #     print("runtime {}D: {}".format(itr, time.time() - chkpt))
-            #     chkpt = time.time()
-            #print("target to device")
             loss = self.criterion(output, map_target.to(self.device))
 
-        # print(self.worker_index, "loss:", loss.shape)
-        if self.worker_index == 0 and itr % 25 == 0:
-            print(loss.item())
-        #     print("runtime {}E: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
         loss.backward()
-        # if self.worker_index == 0:
-        #     print("runtime {}F: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
 
         grads = []
         for param in self.net.parameters():
@@ -704,9 +662,6 @@ class Worker(object):
 
         del self.batches[itr], data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
-        # if self.worker_index == 0:
-        #     print("runtime {}G: {}".format(itr, time.time() - chkpt))
-        #     print("runtime {} total: {}".format(itr, time.time() - batch_start))
         del state_dict
         return grads, bn_state
 

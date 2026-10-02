@@ -14,7 +14,7 @@ class Params:
     def __init__(self):
         self.device = torch.device('cuda')
         self.world_size = torch.cuda.device_count()
-        self.batch_size = 256 * self.world_size
+        self.batch_size = 128 * self.world_size
         self.workers = 40
         self.max_lr = 0.175
         self.momentum = 0.9

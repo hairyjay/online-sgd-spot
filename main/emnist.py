@@ -15,19 +15,19 @@ class EMNISTShards(shards.Shards):
         def __init__(self, classes):
             super().__init__()
             self.conv1 = nn.Conv2d(1, 20, 5, 1)
-            self.bn1 = nn.BatchNorm2d(20) #test BatchNorm
+            # self.bn1 = nn.BatchNorm2d(20) #test BatchNorm
             self.conv2 = nn.Conv2d(20, 50, 5, 1)
-            self.bn2 = nn.BatchNorm2d(50) #test BatchNorm
+            # self.bn2 = nn.BatchNorm2d(50) #test BatchNorm
             self.fc1 = nn.Linear(4*4*50, 500)
             self.fc2 = nn.Linear(500, classes)
 
         def forward(self, x):
             x = F.relu(self.conv1(x))
             x = F.max_pool2d(x, 2, 2)
-            x = self.bn1(x) #test BatchNorm
+            # x = self.bn1(x) #test BatchNorm
             x = F.relu(self.conv2(x))
             x = F.max_pool2d(x, 2, 2)
-            x = self.bn2(x) #test BatchNorm
+            # x = self.bn2(x) #test BatchNorm
             x = x.view(-1, 4*4*50)
             x = F.relu(self.fc1(x))
             x = self.fc2(x)
