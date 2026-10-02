@@ -47,6 +47,12 @@ class ParameterServer(object):
         self.arrival_count = None
 
         self.net = Net(classes).to(self.device)
+        self.batchnorm_track = []
+        state_dict = self.net.state_dict()
+        for k in state_dict:
+            if "running_mean" in k:
+                self.batchnorm_track.append(k.rsplit('.', 1)[0])
+        self.batchnorm_momentum = 0.1
         print("param server init on device {}".format(self.device))
 
     def ready_signal(self, worker_index):
@@ -97,15 +103,16 @@ class ParameterServer(object):
 
             group_start = time.time()
 
-            weights = []
-            for param in self.net.parameters():
-                weights.append(param.data)
-            w_ref = ray.put(weights)
+            # weights = []
+            # for param in self.net.parameters():
+            #     weights.append(param.data)
+            # w_ref = ray.put(weights)
+            s_ref = ray.put(self.net.state_dict())
 
-            grad = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(w_ref, b[1]) for b in batches])
+            states = await asyncio.gather(*[self.workers[b[0]].compute_gradients.remote(s_ref, b[1]) for b in batches])
 
-            self.apply_gradients(grad)
-            del batches, weights, w_ref, grad
+            self.apply_gradients(states)
+            del batches, s_ref, states
             self.arrival_time.append([self.processed, group_start - self.start_time])
             self.gradient_time.append([self.processed, time.time() - group_start])
             self.update_time.append([self.processed, time.time() - self.start_time])
@@ -120,79 +127,46 @@ class ParameterServer(object):
             
             await asyncio.sleep(0)
 
-    def apply_gradients(self, gradients):
-        # if self.processed == (self.k):
-        #     for g in gradients:
-        #         print([tens.shape for tens in g])
-        #     # print("param grad exists: {}".format(True if self.net.parameters()[0].grad else False))
-
-        #     max_grad_norm = 0.0
-        #     min_grad_norm = float('inf')
-        #     nan_detected = False
-        #     for param in self.net.parameters():
-        #         if param.grad is not None:
-        #             grad_norm = param.grad.norm().item()
-        #             if torch.isnan(param.grad).any():
-        #                 nan_detected = True
-        #                 print(f"NaN gradient detected in parameter: {param.size()}")
-        #             max_grad_norm = max(max_grad_norm, grad_norm)
-        #             min_grad_norm = min(min_grad_norm, grad_norm)
-        #             print(param.size(), grad_norm)
-
-        #     print(f"Max gradient norm: {max_grad_norm:.4e}")
-        #     print(f"Min gradient norm: {min_grad_norm:.4e}")
-        #     if nan_detected:
-        #         print("Warning: NaN gradients detected!")
+    def apply_gradients(self, states):
+        gradients = [s[0] for s in states]
+        bn_states = [s[1] for s in states]
         self.net.train()
-        if self.processed == (self.k * 8):
-            for p in self.net.state_dict():
-                print(p)
+        # if self.processed == (self.k * 8):
+        #     for p in self.net.state_dict():
+        #         print(p)
+        new_bn_states = {}
+        state_dict = self.net.state_dict()
+        for k in self.batchnorm_track:
+            new_bn_states[k+".running_mean"] = torch.mean(torch.stack([s[k+".running_mean"] for s in bn_states]), dim=0).clone()
+            new_bn_states[k+".running_var"] = torch.sqrt(torch.mean(torch.stack([torch.square((s[k+".running_var"]-((1-self.batchnorm_momentum)*state_dict[k+".running_var"]))*(1/self.batchnorm_momentum)) for s in bn_states]), dim=0))
+            new_bn_states[k+".num_batches_tracked"] = state_dict[k+".num_batches_tracked"] + self.k
+        self.net.load_state_dict(new_bn_states, strict=False)
         for i, param in enumerate(self.net.parameters()):
             param.grad = torch.mean(torch.stack([g[i] for g in gradients]), dim=0).clone()
-            # if self.processed == (self.k * 8):
-            #     print("Batch {} Layer {}: Norm = {}".format(self.processed, i, param.grad.norm().item()))
-            # param.grad -= self.lr * grad
-        # if self.processed == (self.k):
-        #     # print("param grad exists: {}".format(True if self.net.parameters()[0].grad else False))
-        #     # if self.net.parameters()[0].grad:
-        #     print("grad shape after gathering")
-        #     print([param.grad.shape for param in self.net.parameters()])
-
-        #     max_grad_norm = 0.0
-        #     min_grad_norm = float('inf')
-        #     nan_detected = False
-        #     for param in self.net.parameters():
-        #         if param.grad is not None:
-        #             grad_norm = param.grad.norm().item()
-        #             if torch.isnan(param.grad).any():
-        #                 nan_detected = True
-        #                 print(f"NaN gradient detected in parameter: {param.size()}")
-        #             max_grad_norm = max(max_grad_norm, grad_norm)
-        #             min_grad_norm = min(min_grad_norm, grad_norm)
-        #             print(param.size(), param.grad.size(), grad_norm)
-
-        #     print(f"Max gradient norm: {max_grad_norm:.4e}")
-        #     print(f"Min gradient norm: {min_grad_norm:.4e}")
-        #     if nan_detected:
-        #         print("Warning: NaN gradients detected!")
+        # for k in self.net.state_dict():
+        #     if 'weight' in k or 'bias' in k:
+        #         for s in states:
+        #             print(k, s[k].grad.data)
+        #         state_dict[k].grad = torch.mean(torch.stack([s[k].grad for s in states]), dim=0).clone()
         self.optimizer.step()
         if self.scheduler:
             self.scheduler.step()
         self.processed += self.k
         self.optimizer.zero_grad()
+        del state_dict, new_bn_states
 
     def queue_acc(self):
         self.net.eval()
-        weights = []
+        # weights = []
         # for param in self.net.parameters():
         #     weights.append(param.data)
-        w_ref = ray.put(self.net)
+        s_ref = ray.put(self.net.state_dict())
 
-        ref = self.ts.test_acc.remote(w_ref, self.processed)
+        ref = self.ts.test_acc.remote(s_ref, self.processed)
         # self.k_adap_power = ray.get(ref)
         # self.k_eff = self.k * (2**self.k_adap_power)
         # print("K: ", self.k, self.k_eff, self.k_adap_power)
-        del weights, ref
+        del ref
 
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -360,13 +334,14 @@ class PriceServer(object):
 class TestServer(object):
     def __init__(self, Net, classes, k_adap=False, drift={}):
         self.processed = 0
-        self.weights = {}
+        self.states = {}
         self.queue = asyncio.Queue()
         self.target_itr = -1
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.world_size = torch.cuda.device_count()
         self.is_testset_list = False
-        self.net = Net(classes)
+        self.c_net = Net(classes)
+        self.net = None
         self.criterion = torch.nn.CrossEntropyLoss()
 
         self.drift = drift
@@ -382,8 +357,8 @@ class TestServer(object):
         self.training = True
         return True
 
-    def test_acc(self, weights, itr):
-        self.weights[itr] = weights
+    def test_acc(self, states, itr):
+        self.states[itr] = states
         self.queue.put_nowait(itr)
 
     async def valid_consumer(self, get_testset, start_time, expected_itr=1000, target_acc=None, autoexit=False, force_exit=None, mask=None, get_augment=None):
@@ -445,18 +420,13 @@ class TestServer(object):
                             self.drift_weights[self.drift_mask_n[i]] = (test_time - start) / self.drift["time"][i]
                         self.sampler.weights = torch.as_tensor(self.drift_weights)
             
-            # for i, param in enumerate(self.net.parameters()):
-            #     param.data = self.weights[itr][i].clone()
-            # dist_net = self.net.to(self.device)
-            dist_net = self.weights[itr].to(self.device)
+            self.c_net.load_state_dict(self.states[itr])
             if self.device.type == 'cuda' and self.world_size > 1:
-                dist_net = DataParallel(dist_net.cuda())
-            # is_nan = torch.stack([torch.isnan(p).any() for p in self.net.parameters()]).any()
-            # print(is_nan)
+                self.net = DataParallel(self.c_net.cuda())
 
             self.processed = itr
-            acc, loss, count = self.get_acc(dist_net, test_loader)
-            del self.weights[itr], dist_net
+            acc, loss, count = self.get_acc(test_loader)
+            del self.states[itr]
             print("AFTER {} BATCHES: {:.2f}% ACC; {:.4f} LOSS; {:.0f} COUNT".format(self.processed, acc, loss, count))
             accuracy.append([self.processed, acc, loss])
 
@@ -480,19 +450,19 @@ class TestServer(object):
 
         return 'ts', np.array(accuracy)
 
-    def get_acc(self, net, test_loader):
-        def compute_acc(net, inputs, targets, top1):
+    def get_acc(self, test_loader):
+        def compute_acc(inputs, targets, top1):
             # inputs = self.augment(inputs.to(self.device))
             with autocast(device_type=self.device.type):
                 targets = targets.to(self.device)
-                outputs = net(inputs.to(self.device))
+                outputs = self.net(inputs.to(self.device))
                 l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets)
             top1.update(acc1[0], inputs.size(0))
             del outputs
             #a = time.time()
             return l.item()
-        net.eval()
+        self.net.eval()
         top1 = data_tools.AverageMeter()
         loss = 0
         if self.drift:
@@ -515,7 +485,7 @@ class TestServer(object):
             #print(count)
         else:
             for i, (inputs, targets) in enumerate(test_loader):
-                loss += compute_acc(net, inputs, self.drift_map[targets], top1)
+                loss += compute_acc(inputs, self.drift_map[targets], top1)
             loss /= i
         return top1.avg.item(), loss, top1.count
     
@@ -557,6 +527,12 @@ class Worker(object):
         # if opt == 'adam':
         #     self.optimizer = optim.Adam(self.net.parameters(), lr=lr, weight_decay=5e-4, betas=(0.9, 0.999), eps=1e-08)
         # else:
+        self.batchnorm_track = []
+        state_dict = self.net.state_dict()
+        for k in state_dict:
+            if "running_mean" in k:
+                self.batchnorm_track.append(k.rsplit('.', 1)[0])
+        # print(self.batchnorm_track)
         self.optimizer = optim.SGD(self.net.parameters(), lr=0.005, momentum=0, weight_decay=5e-4)
         self.criterion = torch.nn.CrossEntropyLoss()
         self.accs = []
@@ -673,15 +649,13 @@ class Worker(object):
                 self.ps.signal.remote(self.worker_index, self.curritr)
                 self.curritr += 1
 
-    def compute_gradients(self, weights, itr):
+    def compute_gradients(self, state, itr):
         batch_start = time.time()
         # chkpt = batch_start
 
-        for i, param in enumerate(self.net.parameters()):
-            param.data = weights[i].to(self.device)
-        # if self.worker_index == 0:
-        #     print("runtime {}A: {}".format(itr, time.time() - chkpt))
-        #     chkpt = time.time()
+        self.net.load_state_dict(state)
+        # for i, param in enumerate(self.net.parameters()):
+        #     param.data = weights[i].to(self.device)
 
         try:
             data, target = next(self.iterator)
@@ -722,13 +696,19 @@ class Worker(object):
         grads = []
         for param in self.net.parameters():
             grads.append(param.grad.data)
+        bn_state = {}
+        state_dict = self.net.state_dict()
+        for k in state_dict:
+            if k.rsplit('.', 1)[0] in self.batchnorm_track:
+                bn_state[k] = state_dict[k].clone()
 
         del self.batches[itr], data, target, map_target, output, loss
         self.gradient_time.append([itr, time.time() - batch_start])
         # if self.worker_index == 0:
         #     print("runtime {}G: {}".format(itr, time.time() - chkpt))
         #     print("runtime {} total: {}".format(itr, time.time() - batch_start))
-        return grads
+        del state_dict
+        return grads, bn_state
 
     def preempt(self):
         self.preempt = True
