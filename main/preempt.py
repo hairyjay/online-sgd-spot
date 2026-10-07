@@ -29,6 +29,7 @@ parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
 parser.add_argument('--bs', default=32, type=int, help='batch size on each worker')
 parser.add_argument('--t', default=0.008, type=float, help='mean inter-arrival time of an individual data point')
 parser.add_argument('--time-scale', default=1, type=float, help='time scaling factor')
+parser.add_argument('--cycles', default=500, type=float, help='preemption cycling time')
 parser.add_argument('--K', default=5, type=int, help='number of batches per update')
 parser.add_argument('--k-adap', default=False, action='store_true', help='adaptive doubling of K batches per update if converges too early')
 parser.add_argument('--test', default=1000, type=int, help='number of batches per accuracy check')
@@ -60,8 +61,10 @@ if __name__ == "__main__":
 
     # PRICING
     if args.a <= 1.0:
-        pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
-        #pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
+        pricing = price.TracePricing("us-west-1a_L.npy", 0.631, scale=100) # TRACE "ca-central-1b_S.npy"
+        # pricing = price.TracePricing("eu-west-2a_L.npy", 0.615, scale=2000) # TRACE "ca-central-1b_S.npy"
+        # pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
+        # pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"
     else:
         pricing = price.FixedPricing(0.286) # FIXED PRICE
     stats["pricing"] = pricing.get_stats()
@@ -75,7 +78,7 @@ if __name__ == "__main__":
         drift["rand"] = args.drift_rand
 
     # ALLOCATION
-    allocation = price.InstanceAllocation(args, drift=drift)
+    allocation = price.InstanceAllocation(args, drift=drift, cycles=args.cycles)
     stats["allocation"] = allocation.get_stats()
 
     # DATA RATES

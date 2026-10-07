@@ -9,10 +9,13 @@ class TracePricing(object):
         with open(os.path.join("price-trace", filename), 'rb') as f:
             self.trace = np.load(f)
             self.trace[1, :] /= scale
+            self.trace = np.delete(self.trace, (-1), axis=1)
         self.on_demand = on_demand
         self.filename = filename
         self.scale = scale
         self.i = -1
+        # print(self.trace)
+        print(np.sum(self.trace[1, :-1]))
 
     def start_price(self):
         return self.trace[0, 0]
@@ -21,6 +24,7 @@ class TracePricing(object):
         self.i += 1
         if self.i >= self.trace.shape[1]:
             self.i = 0
+        print("spot price change #{}/{}, set to {}, next update in {}s".format(self.i, self.trace.shape[1], self.trace[0, self.i], self.trace[1, self.i]))
         return self.trace[0, self.i], self.trace[1, self.i]
 
     def get_on_demand(self):

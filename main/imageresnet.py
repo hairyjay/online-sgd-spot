@@ -25,7 +25,7 @@ class ImageResNetShards(shards.Shards):
         self.classes = 1000
         super().__init__(args, pricing, drift, classes=self.classes)
         if self.args.target == 0:
-            self.args.target = 0.60
+            self.args.target = 0.85
             print("DEFAULT -- setting target to {}".format(self.args.target))
         # self.norm_mean = 0.1307
         # self.norm_std = 0.3081
@@ -78,9 +78,11 @@ class ImageResNetShards(shards.Shards):
         scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
                                                   max_lr=0.175,
                                                   total_steps=50*(1281167//(self.args.bs*self.args.K)),
+                                                  epochs=50,
+                                                  steps_per_epoch=1281167//(self.args.bs*self.args.K),
                                                   pct_start=0.3,
                                                   div_factor=25.0,
-                                                  final_div_factor=1e-4)
+                                                  final_div_factor=1e4)
         # scheduler = optim.lr_scheduler.StepLR(optimizer,
         #                                       step_size=30*(1281167//(self.args.bs*self.args.K)),
         #                                       gamma=0.1)

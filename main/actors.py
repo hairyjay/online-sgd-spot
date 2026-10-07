@@ -193,7 +193,7 @@ class PriceServer(object):
         self.availability = 1
         self.spot_time = 1
         self.on_time = np.ones(N)
-        print(adaptive)
+        # print(adaptive)
 
         if adaptive:
             self.persistence = np.ones(N)
@@ -215,40 +215,39 @@ class PriceServer(object):
         total_cost = 0
 
         while self.running:
+            # if update_time == False:
+            #     interval = refresh_interval
 
-            if update_time == False:
-                interval = refresh_interval
+            #     self.refresh_workers(allocation, adaptive, last_refresh)
+            # else:
+            if update_time < next_interval or update_time <= 0:
+                interval = update_time
+                next_interval -= update_time
+                self.p_spot, update_time = self.price_distr.get_price()
+                # print("spot price changed to {}".format(self.p_spot))
+
+                if adaptive:
+                    self.adap_allocate(allocation)
+                else:
+                    self.persistence = allocation.allocate(l, self.p_spot, self.p_on_demand)
+                prices = self.persistence * self.p_spot
+                prices[prices == 0] = self.p_on_demand
+            else:
+                interval = next_interval
+                next_interval = refresh_interval
+                update_time -= interval
 
                 self.refresh_workers(allocation, adaptive, last_refresh)
-            else:
-                if update_time < next_interval:
-                    interval = update_time
-                    next_interval -= update_time
-                    self.p_spot, update_time = self.price_distr.get_price()
-                    print("spot price changed to {}".format(self.p_spot))
-
-                    if adaptive:
-                        self.adap_allocate(allocation)
-                    else:
-                        self.persistence = allocation.allocate(l, self.p_spot, self.p_on_demand)
-                    prices = self.persistence * self.p_spot
-                    prices[prices == 0] = self.p_on_demand
-                else:
-                    interval = next_interval
-                    next_interval = refresh_interval
-                    update_time -= interval
-
-                    self.refresh_workers(allocation, adaptive, last_refresh)
-                
-                if self.drift:
-                    if last_update - self.start_time > min(self.drift["start"]):
-                        self.adap_allocate(allocation)
-                        self.drift = {}
-                
-
+            
+            if self.drift:
+                if last_update - self.start_time > min(self.drift["start"]):
+                    self.adap_allocate(allocation)
+                    self.drift = {}
+            
             last_refresh = time.time()
 
-            await asyncio.sleep(interval)
+            # print("price server waiting time: {}s, next price update: {}s".format(next_interval, update_time))
+            await asyncio.sleep(max(0, interval))
 
             real_interval = time.time() - last_update
             last_update = time.time()
@@ -280,7 +279,6 @@ class PriceServer(object):
         return 'price', np.array(self.cost_log)
 
     def refresh_workers(self, allocation, adaptive, interval):
-        
         switch = allocation.preempt(self.spot_state)
         if adaptive:
             self.adap_allocate(allocation)
@@ -293,8 +291,8 @@ class PriceServer(object):
                 self.workers[i].preempt.remote()
         new_ns = np.sum(self.persistence)
         new_running = np.sum(np.logical_or((1 - self.persistence), self.spot_state))
-        if self.ns != new_ns or self.running != new_running:
-            print("NS = {}, number running = {}, since last refresh = {}, p_spot = {}, p_od = {}".format(new_ns, new_running, time.time() - interval, self.p_spot, self.p_on_demand))
+        if self.running != new_running:# or self.ns != new_ns:nol
+            print("NS = {}, number running = {}, time since start: {:.0f}, p_spot = {}, p_od = {}".format(new_ns, new_running, time.time() - self.start_time, self.p_spot, self.p_on_demand))
             self.ns = new_ns
             self.running = new_running
 
@@ -408,12 +406,12 @@ class TestServer(object):
                 self.net = DataParallel(self.c_net.cuda())
 
             self.processed = itr
-            acc, loss, count = self.get_acc(test_loader)
+            acc, acc5, loss, count = self.get_acc(test_loader)
             del self.states[itr]
-            print("AFTER {} BATCHES: {:.2f}% ACC; {:.4f} LOSS; {:.0f} COUNT".format(self.processed, acc, loss, count))
-            accuracy.append([self.processed, acc, loss])
+            print("AFTER {} BATCHES: {:.2f}% ACC; {:.2f}% TOP-5 ACC; {:.4f} LOSS; {:.0f} COUNT".format(self.processed, acc, acc5, loss, count))
+            accuracy.append([self.processed, acc, loss, acc5])
 
-            if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 5000, expected_itr):
+            if autoexit and self.target_itr > 0 and self.processed >= max(self.target_itr + 1000, expected_itr):
                 print("AUTOEXITING...")
                 self.terminate()
                 break
@@ -424,29 +422,33 @@ class TestServer(object):
                 break
 
             if target_acc and len(accuracy) >= 10 and self.target_itr < 0:
-                last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
-                if last_10_acc > target_acc * 100:
+                # last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
+                last_5_acc = np.mean(np.array([a[3] for a in accuracy[-10:]]))
+                # if last_10_acc > target_acc * 100:
+                if last_5_acc > target_acc * 100:
                     self.target_itr = self.processed
-                    print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_10_acc))
+                    print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_5_acc))
 
             print("TEST TIME: {}".format(time.time() - test_start))
 
         return 'ts', np.array(accuracy)
 
     def get_acc(self, test_loader):
-        def compute_acc(inputs, targets, top1):
+        def compute_acc(inputs, targets, top1, top5):
             # inputs = self.augment(inputs.to(self.device))
             with autocast(device_type=self.device.type):
                 targets = targets.to(self.device)
                 outputs = self.net(inputs.to(self.device))
                 l = self.criterion(outputs, targets)
-            acc1 = data_tools.comp_accuracy(outputs, targets)
+            acc1 = data_tools.comp_accuracy(outputs, targets, topk=(1,5))
             top1.update(acc1[0], inputs.size(0))
+            top5.update(acc1[1], inputs.size(0))
             del outputs
             #a = time.time()
             return l.item()
         self.net.eval()
         top1 = data_tools.AverageMeter()
+        top5 = data_tools.AverageMeter()
         loss = 0
         if self.drift:
             count = np.zeros(len(self.drift_map))
@@ -462,15 +464,15 @@ class TestServer(object):
                 u, c = np.unique(targets, return_counts=True)
                 #print(u, c)
                 count[u] += c
-                loss += compute_acc(inputs, self.drift_map[targets], top1)
+                loss += compute_acc(inputs, self.drift_map[targets], top1, top5)
             #print(self.drift_weights)
             #print(self.drift_map)
             #print(count)
         else:
             for i, (inputs, targets) in enumerate(test_loader):
-                loss += compute_acc(inputs, self.drift_map[targets], top1)
+                loss += compute_acc(inputs, self.drift_map[targets], top1, top5)
             loss /= i
-        return top1.avg.item(), loss, top1.count
+        return top1.avg.item(), top5.avg.item(), loss, top1.count
     
     def terminate(self):
         self.queue.put_nowait("stop")
@@ -480,7 +482,7 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=5, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
     def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, drift={}):
