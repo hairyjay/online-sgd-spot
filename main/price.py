@@ -1,7 +1,6 @@
 import numpy as np
 import numpy.random as random
-import asyncio
-import time
+import json
 import os
 
 class TracePricing(object):
@@ -53,6 +52,34 @@ class FixedPricing(object):
         return {"distribution": "fixed",
                 "price": self.p}
 
+def load_spot_traces(n):
+    directory = os.fsencode('./spot-trace')
+    traces = []
+    lens = []
+
+    i = 0
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if filename.endswith(".json"):
+            with open(os.path.join(directory, file)) as json_file:
+                data = json.load(json_file)
+                trace = data["data"]
+                print(len(trace), np.mean(trace))
+
+                traces.append(trace)
+                lens.append(len(trace))
+                i += 1
+    for j in range(i, n):
+        shift = random.randint(-100, high=101, size=1)
+        trace = np.roll(traces[j % i], shift)
+        traces.append(trace)
+
+    min_len = min(lens)
+    traces = np.array([t[:min_len] for t in traces])
+    trace_sum = np.sum(traces, axis=0)
+    print(traces, traces.shape)
+    return traces, np.mean(trace_sum)/n
+
 class InstanceAllocation(object):
     def __init__(self, args, drift={}, cycles=500):
         self.J = args.J
@@ -73,6 +100,10 @@ class InstanceAllocation(object):
             self.drift_time = []
             for i in range(len(drift["start"])):
                 self.drift_time.append(drift["start"][i] + drift["time"][i])
+        self.spot_trace = None
+        if args.spot_trace:
+            self.spot_trace, self.a = load_spot_traces(self.N)
+            self.trace_idx = -1
 
     def allocate(self, l, p_spot, p_on_demand, arrived=0, elapsed=0, a=None):
         spot = np.zeros(self.N)
@@ -130,12 +161,17 @@ class InstanceAllocation(object):
         return J * self.b * (self.N * p_spot + (a * p_spot - p_on_demand) * ns) / (np.sum(l) - (1 - a) * rate_sum)
 
     def preempt(self, state):
-        if self.q_turn_off <= 0:
-            return np.zeros(state.shape)
+        if self.spot_trace is not None:
+            self.trace_idx += 1
+            new_state = self.spot_trace[:, self.trace_idx % self.spot_trace.shape[1]]
+            return np.logical_xor(state, new_state)
         else:
-            probs = state * self.q_turn_off
-            probs[probs == 0] = self.q_turn_on
-            return random.binomial(1, probs)
+            if self.q_turn_off <= 0:
+                return np.zeros(state.shape)
+            else:
+                probs = state * self.q_turn_off
+                probs[probs == 0] = self.q_turn_on
+                return random.binomial(1, probs)
 
     def get_stats(self):
         return {"expected_interations": self.J,

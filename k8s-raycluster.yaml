@@ -112,7 +112,7 @@ spec:
           key: value
       spec:
         nodeSelector:
-          eks.amazonaws.com/nodegroup: ts
+          eks.amazonaws.com/nodegroup: gpu-w
         containers:
         - name: doll-test # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character (e.g. 'my-name',  or '123-abc'
           image: rayproject/ray:2.34.0
@@ -137,9 +137,9 @@ spec:
               memory: "14G"
               nvidia.com/gpu: "1"
             requests:
-              cpu: "3500m"
-              memory: "14G"
-              # nvidia.com/gpu: "1"     
+              cpu: "3"
+              memory: "12G"
+              nvidia.com/gpu: "1"     
         tolerations:
         - key: nvidia.com/gpu
           operator: Exists

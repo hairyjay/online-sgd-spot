@@ -40,6 +40,7 @@ parser.add_argument('--size', default=8, type=int, help='number of workers')
 parser.add_argument('--a', default=0.95, type=float, help='spot instance availability')
 parser.add_argument('--save', '-s', default=True, action='store_true', help='whether save the training results')
 parser.add_argument('--adap', '-d', action='store_true', help='adaptive method')
+parser.add_argument('--spot-trace', '-t', action='store_true', help='use measured spot traces')
 parser.add_argument('--autoexit', '-e', action='store_true', help='whether to exit on its own')
 parser.add_argument('--force-exit', '-f', default=15000, type=int, help='time when run is forced to exit')
 parser.add_argument('--distr', default='fixed', help='arrival rate distribution')
@@ -61,7 +62,8 @@ if __name__ == "__main__":
 
     # PRICING
     if args.a <= 1.0:
-        pricing = price.TracePricing("us-west-1a_L.npy", 0.631, scale=100) # TRACE "ca-central-1b_S.npy"
+        # pricing = price.TracePricing("us-west-1a_L.npy", 0.631, scale=100) # TRACE "ca-central-1b_S.npy"
+        pricing = price.TracePricing("us-east-2a_S.npy", 0.582, scale=100) # TRACE "ca-central-1b_S.npy"
         # pricing = price.TracePricing("eu-west-2a_L.npy", 0.615, scale=2000) # TRACE "ca-central-1b_S.npy"
         # pricing = price.TracePricing("ca-central-1b_S.npy", 0.286, scale=2000) # TRACE "ca-central-1b_S.npy"
         # pricing = price.TracePricing("ca-central-1b_L.npy", 0.186, scale=2000) # TRACE "ca-central-1b_L.npy"

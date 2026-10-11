@@ -10,14 +10,14 @@ from torch.nn import DataParallel
 from . import data_tools
 from . import shards
 #from . import price
-from torch.amp import autocast
+# from torch.amp import autocast
 
 ##################################################################
 # parameter server
 ##################################################################
 
-@ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
-#@ray.remote(num_cpus=2)             #CPU MODEL
+# @ray.remote(num_cpus=2, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=2)             #CPU MODEL
 class ParameterServer(object):
     def __init__(self, classes, Net, ts, pr, size, time_scale, k=5, t=100, B=256):
         self.params = 0
@@ -310,7 +310,8 @@ class PriceServer(object):
 # test server
 ##################################################################
 
-@ray.remote(num_cpus=45, num_gpus=4) #GPU MODEL
+# @ray.remote(num_cpus=45, num_gpus=4) #GPU MODEL
+@ray.remote(num_cpus=3, num_gpus=1) #GPU MODEL
 #@ray.remote(num_cpus=4)             #CPU MODEL
 class TestServer(object):
     def __init__(self, Net, classes, k_adap=False, drift={}):
@@ -404,6 +405,8 @@ class TestServer(object):
             self.c_net.load_state_dict(self.states[itr])
             if self.device.type == 'cuda' and self.world_size > 1:
                 self.net = DataParallel(self.c_net.cuda())
+            else:
+                self.net = self.c_net.to(self.device)
 
             self.processed = itr
             acc, acc5, loss, count = self.get_acc(test_loader)
@@ -422,12 +425,12 @@ class TestServer(object):
                 break
 
             if target_acc and len(accuracy) >= 10 and self.target_itr < 0:
-                # last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
-                last_5_acc = np.mean(np.array([a[3] for a in accuracy[-10:]]))
-                # if last_10_acc > target_acc * 100:
-                if last_5_acc > target_acc * 100:
+                last_10_acc = np.mean(np.array([a[1] for a in accuracy[-10:]]))
+                # last_5_acc = np.mean(np.array([a[3] for a in accuracy[-10:]]))
+                if last_10_acc > target_acc * 100:
+                # if last_5_acc > target_acc * 100:
                     self.target_itr = self.processed
-                    print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_5_acc))
+                    print("TARGET OF {}% REACHED AFTER {} BATCHES AND {}s AT {}%".format(target_acc * 100, self.target_itr, time.time() - start_time, last_10_acc))
 
             print("TEST TIME: {}".format(time.time() - test_start))
 
@@ -436,10 +439,10 @@ class TestServer(object):
     def get_acc(self, test_loader):
         def compute_acc(inputs, targets, top1, top5):
             # inputs = self.augment(inputs.to(self.device))
-            with autocast(device_type=self.device.type):
-                targets = targets.to(self.device)
-                outputs = self.net(inputs.to(self.device))
-                l = self.criterion(outputs, targets)
+            # with autocast(device_type=self.device.type):
+            targets = targets.to(self.device)
+            outputs = self.net(inputs.to(self.device))
+            l = self.criterion(outputs, targets)
             acc1 = data_tools.comp_accuracy(outputs, targets, topk=(1,5))
             top1.update(acc1[0], inputs.size(0))
             top5.update(acc1[1], inputs.size(0))
@@ -482,8 +485,8 @@ class TestServer(object):
 # worker
 ##################################################################
 
-@ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
-#@ray.remote(num_cpus=2)             #CPU MODEL
+# @ray.remote(num_cpus=4, num_gpus=1) #GPU MODEL
+@ray.remote(num_cpus=2)             #CPU MODEL
 class Worker(object):
     def __init__(self, worker_index, ps, classes, Net, time_scale, B=32, drift={}):
         self.worker_index = worker_index
@@ -647,9 +650,9 @@ class Worker(object):
         self.optimizer.zero_grad()
         self.net.train()
 
-        with autocast(device_type=self.device.type):
-            output = self.net(data.to(self.device))
-            loss = self.criterion(output, map_target.to(self.device))
+        # with autocast(device_type=self.device.type):
+        output = self.net(data.to(self.device))
+        loss = self.criterion(output, map_target.to(self.device))
 
         loss.backward()
 
@@ -680,7 +683,7 @@ class Worker(object):
 ##################################################################
 # coordinator class
 ##################################################################
-from ray.experimental.collective import create_collective_group
+# from ray.experimental.collective import create_collective_group
 
 class Coordinator(object):
     class Net():
@@ -708,7 +711,7 @@ class Coordinator(object):
                                               self.args.time_scale,
                                               B=self.args.bs,
                                               drift=drift))
-        self.group = create_collective_group([self.ts, self.pr, self.ps] + self.workers, backend="torch_gloo")
+        # self.group = create_collective_group([self.ts, self.pr, self.ps] + self.workers, backend="torch_gloo")
         self.processes = []
 
     def run(self):

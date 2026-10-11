@@ -3,7 +3,7 @@ import numpy as np
 from datetime import datetime
 import os
 
-with open('../price-trace/price_trace_us_w2_c5_2026.json') as json_file:
+with open('../price-trace/price_trace_us_w2_p3_2026.json') as json_file:
     data = json.load(json_file)
     trace = data["SpotPriceHistory"]
     data = {}
@@ -27,5 +27,5 @@ with open('../price-trace/price_trace_us_w2_c5_2026.json') as json_file:
         log = np.array([price, time])
         #print(log.shape)
         print(d[1][0], np.mean(log[0, :]), np.min(log[0, :]), np.max(log[0, :]))
-        with open(os.path.join("..", "price-trace", "c5_{}_{}.npy".format(d[0], d[1][0])), 'wb') as f:
+        with open(os.path.join("..", "price-trace", "p3_{}_{}.npy".format(d[0], d[1][0])), 'wb') as f:
             np.save(f, log)
